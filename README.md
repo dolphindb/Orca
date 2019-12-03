@@ -11,7 +11,7 @@ Orca项目在DolphinDB之上实现了pandas API，使用户能更高效地分析
 
 Python的第三方库pandas是一个强大的分析结构化数据的工具，具有高性能、接口易用、易学习的特点，在数据科学和量化金融领域广受欢迎。然而，当我们开始处理TB级别的海量数据时，单核运行的pandas就显得力不从心；pandas的高内存占用也是影响其发挥的限制之一。当我们拥有更多的处理器核，拥有多台物理机器时，我们会希望充分利用并发的优势，提高数据处理的效率。
 
-DolphinDB是一个分布式数据分析引擎，它可以将TB级的海量数据存储在多台物理机器上，并能充分利用CPU，对海量数据进行高性能分析计算。在进行同样功能的计算时，DolphinDB在性能上比pandas快1~2个数量级，并且内存占用通常小于pandas的1/2[^1](https://zhuanlan.zhihu.com/p/41979956)。但DolphinDB的部署和开发方式都和pandas有显著区别，用户若要从pandas迁移到DolphinDB，需要对已有代码做出大量修改。幸运的是，DolphinDB已经着手开发Orca项目——一个基于DolphinDB引擎的pandas DataFrame API的实现。它让用户能够以pandas的编程风格，同时利用DolphinDB的性能优势，对海量数据进行高效分析。相比panddas的全内存计算，Orca支持分布式存储和计算。对于同样的数据量，内存占用一般小于pandas的1/2。
+DolphinDB是一个分布式数据分析引擎，它可以将TB级的海量数据存储在多台物理机器上，并能充分利用CPU，对海量数据进行高性能分析计算。在进行同样功能的计算时，DolphinDB在性能上比pandas快1~2个数量级，并且[内存占用通常小于pandas的1/2](https://zhuanlan.zhihu.com/p/41979956)。但DolphinDB的部署和开发方式都和pandas有显著区别，用户若要从pandas迁移到DolphinDB，需要对已有代码做出大量修改。幸运的是，DolphinDB已经着手开发Orca项目——一个基于DolphinDB引擎的pandas DataFrame API的实现。它让用户能够以pandas的编程风格，同时利用DolphinDB的性能优势，对海量数据进行高效分析。相比panddas的全内存计算，Orca支持分布式存储和计算。对于同样的数据量，内存占用一般小于pandas的1/2。
 
 ### Orca的架构
 
