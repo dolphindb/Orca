@@ -44,7 +44,7 @@
     由于Orca是基于DolphinDB Python API开发的，为此，Orca提供`connect`函数来建立一个与DolphinDB服务器的连接，而且在开始使用Orca函数之前，必须首先调用该函数创建连接。
 
     ```python
-    >>> import orca
+    >>> import dolphindb.orca as orca
     >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
     ```
 
@@ -122,9 +122,6 @@
     其中，数据库名称为"dfs://testRead"，创建的分区表名为"tb1"。我们可以通过`read_table`函数将一个分区表加载到Python应用程序中，存放在一个Orca的DataFrame对象里。
     
     ```Python
-    import orca
-    orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     odfs=orca.read_table("dfs://testRead","tb1")
     ```
 
@@ -139,9 +136,6 @@
     pandas允许在定义一个Series时不设置name参数，或者使用数字作为name，这在Orca中的实现相当于在DolphinDB server端新建一个只含有一列的表，而表的列名则不允许为空值且不能使用数字。因此，在创建Orca的Series而不指定名字时，系统会默认为该Series自动生成一个名字，当然，用户不会感知到自动生成的名字，只是会看到Orca抛出的WARNING信息。例如，创建一个名字为0的series，Orca会抛出WARNING：
 
     ```Python
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> a = orca.Series([1, 2, 3, 4], name='0')
     # raise warning:
     /Orca/Orca/core/common.py:36: NotDolphinDBIdentifierWarning: The DataFrame contains an invalid column name for DolphinDB. Will convert to an automatically generated column name.
@@ -160,10 +154,6 @@
     pandas与Orca的强制转换机制存在差异。若将一个精度更高的数据类型的值赋值给一个精度更低的Series，在pandas中最终得到的Series取值为向下取整，在Orca中则为四舍五入取整。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps=pd.Series([10,20,30], index=[0,2,3])
     >>> os=orca.Series([10,20,30], index=[0,2,3])
     >>> os
@@ -197,10 +187,6 @@
     pandas允许通过直接访问一个不存在的index去增加新的行，但是Orca暂不支持这么做。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps = pd.Series([10, 1, 19, -5], index=['a', 'b', 'c', 'd'])
     >>> os = orca.Series([10, 1, 19, -5], index=['a', 'b', 'c', 'd'])
     >>> ps
@@ -249,11 +235,6 @@
     下例中，分别对pandas和Orca的Series进行条件过滤，可以看出Orca将NaN值视为符合过滤条件的值输出。
 
     ```Python
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps = pd.Series([1,np.nan,0])
     >>> os = orca.Series([1,np.nan,0])
     >>> ps[ps<1]
@@ -273,10 +254,6 @@
     pandas的字符串会区分NaN值和空字符串，Orca的空字符串就是NaN。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps = pd.Series(["","s","a"])
     >>> os = orca.Series(["","s","a"])
     >>> ps.hasnans
@@ -293,10 +270,6 @@
     pandas非零数除以零得到同符号的无穷大；零除以零得到NaN。Orca任何数除以零得到NULL。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps=pd.Series([1,0,2])
     >>> os=orca.Series([1,0,2])
 
@@ -356,11 +329,6 @@
     如下所示，Orca暂不支持通过loc去访问带有DatetimeIndex的Series和DataFrame。
     
     ```Python
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> pdd = pd.DataFrame(
               {'id': [1, 2, 2, 3, 3], 'sym': ['s', 'a', 's', 'a', 's'], 'values': [np.nan, 2, 2, np.nan, 2]},
               index=pd.date_range('20190101', '20190105', 5))
@@ -388,10 +356,6 @@
     当DataFrame的表中有重复的index时，padas不支持以重复的index值为slice的下界，而Orca则以第一个出现的重复值为slice的下界输出结果。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> pdf = pd.DataFrame([[1, 2, 1], [4, 5, 5], [7, 8, 7], [1, 5, 8], [7, 5, 1]], index=[7, 8, 2, 8, 9],
                     columns=['max_speed', 'shield', 'size'])
     >>> odf = orca.DataFrame([[1, 2, 1], [4, 5, 5], [7, 8, 7], [1, 5, 8], [7, 5, 1]], index=[7, 8, 2, 8, 9],
@@ -432,10 +396,6 @@
     下例中，pandas通过`loc`去修改Series的值，返回的结果是整列Series变成了np.float64类型，而Orca返回的结果仍然是np.int64类型。通过`iloc`去访问Series和DataFrame并进行类似的修改操作同样会有类似的差异。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps = pd.Series([10, 20, 30], index=[0, 2, 3])
     >>> ps
     # output
@@ -474,11 +434,6 @@
     Orca不支持：当index有重复的列，通过一个DataFrame以index对齐的原则去修改另一个DataFrame的值
     
     ```Python
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> pdf = pd.DataFrame([[1, 2, 1], [4, 5, 5], [7, 8, 7], [1, 5, 8], [7, 5, 1]], index=[7, 8, 9, 8, 9],  columns=['max_speed', 'shield', 'size'])
     >>> pdf
     # output
@@ -518,10 +473,6 @@
     pandas支持直接通过loc访问不存在的index或者columns来新增行或者列，而Orca暂不支持。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> pdf = pd.DataFrame([[1, 2, 1], [4, 5, 5], [7, 8, 7], [1, 5, 8], [7, 5, 1]], index=[7, 8, 2, 8, 9],
                     columns=['max_speed', 'shield', 'size'])
     >>> odf = orca.DataFrame([[1, 2, 1], [4, 5, 5], [7, 8, 7], [1, 5, 8], [7, 5, 1]], index=[7, 8, 2, 8, 9],
@@ -576,8 +527,6 @@
     pandas中，对DataFrame和Series进行加法运算，有如下几种形式：
 
     ```Python
-    >>> import pandas as pd
-
     >>> pdf = pd.DataFrame({'angles': [0, 3, 4], 'degrees': [360, 180, 360]}, index=['circle', 'triangle', 'rectangle'])
     >>> pdf + pd.Series([1, 2], index=["angles", "degrees"])
     # output
@@ -604,10 +553,6 @@
     上例中，直接通过”+“号将DataFrame和Series进行的相加以及不指定axis参数的相加默认按照axis=0的规则进行相加。Orca不支持这种情况，仅支持axis='index'或1的情况。因此在Orca中，一个DataFrame可以这样与一个Series进行四则运算：
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> odf = orca.DataFrame({'angles': [0, 3, 4], 'degrees': [360, 180, 360]}, index=['circle', 'triangle', 'rectangle'])
     >>> odf.add(orca.Series([1, 2, 3], index=['circle', 'triangle', 'rectangle']), axis='index')
               angles  degrees
@@ -619,10 +564,6 @@
     > 注意，在Orca中，只有上述情况是不支持axis='columns'的，若将一个DataFrame与一个list相加，axis='columns'的情况还是支持的：  
     
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> odf = orca.DataFrame({'angles': [0, 3, 4], 'degrees': [360, 180, 360]}, index=['circle', 'triangle', 'rectangle'])
     >>> (odf + [1, 2]).compute()
     # output
@@ -639,10 +580,6 @@
     如下例所示，在求余运算中，除数中出现了负数，Orca返回的结果对应位置值为NaN。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-    
     >>> pd.Series([1, 2, 12, 10], index=['a', 'b', 'c', 'd']) % [10, 1, 19, -4]
     # output
     a     1
@@ -664,12 +601,7 @@
 
     pandas支持对浮点数的求余运算，而Orca暂不支持。
     
-    ```Python
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-    
+    ```Python   
     >>> pd.Series([5.5, 10, -4.5, 2.5, np.nan]) % pd.Series([2.5, -4.5, 2.5, np.nan, 3])
     # output
     0    0.5
@@ -703,8 +635,6 @@
     Orca的这三个函数目前仅支持字符串或者一个字典，不支持lambda函数。
 
     ```Python
-    >>> import pandas as pd
-
     >>> ps=pd.Series([1, 2, 12, 10], index=['a', 'b', 'c', 'd'])
     >>> ps.apply(lambda x: x + 1)
     ```
@@ -712,9 +642,6 @@
     上面的脚本在Orca中，则需要这样实现：
     
     ```Python
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> os=orca.Series([1, 2, 12, 10], index=['a', 'b', 'c', 'd'])
     >>> os.apply("(x->x+1)")
     ```
@@ -735,11 +662,6 @@
     Orca的rolling函数目前支持window和on参数。在进行rolling时，若遇到空值，pandas在对应位置返回NaN，而Orca返回上一次计算的结果。
 
     ```Python
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> pdf = pd.DataFrame({'id': np.arange(1, 6, 1), 'B': [0, 1, 2, np.nan, 4]})
     >>> pdf
     # output
@@ -782,11 +704,6 @@
     不指定on参数时，则默认按照index进行rolling。
 
     ```Python
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> otime = orca.to_datetime(['20130101 09:00:00','20130101 09:00:02','20130101 09:00:03','20130101 09:00:05','20130101 09:00:06'])
     >>> odf = orca.DataFrame({'A': ["a", "c", "w", "f", "f"], 'B': [0, 1, 2, np.nan, 4]}, index=orca.Index(data=otime, name='time'))
     >>> odf
@@ -876,11 +793,6 @@
     这几个函数在遇到NaN值时会返回NaN，Orca会在NaN值的位置返回前一个计算结果。
 
     ```Python
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> pdf = pd.DataFrame([[1, np.nan, 3], [4, np.nan, 6], [7, np.nan, 9], [np.nan, np.nan, 1]], columns=['A', 'B', 'C'])
     >>> odf = orca.DataFrame([[1, np.nan, 3], [4, np.nan, 6], [7, np.nan, 9], [np.nan, np.nan, 1]], columns=['A', 'B', 'C'])
 
@@ -922,11 +834,6 @@
     在计算时，pandas的`rank`函数会把重复的排名取平均值，而Orca中两个重复的元素具有相同的排名。在遇到NaN时，pandas返回NaN，而Orca将NaN值视为最小值。
 
     ```Python
-    >>> import pandas as pd
-    >>> import numpy as np
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps = pd.Series([0.1, 1.3, 2.7, np.nan, np.nan, 1.3])
     >>> os = orca.Series([0.1, 1.3, 2.7, np.nan, np.nan, 1.3])
     >>> os 
@@ -969,10 +876,6 @@
     pandas中的`between`是一个三元运算符，上下边界都支持向量类型。Orca的`between`函数仅支持标量作为参数，且不支持inclusive参数。
 
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps=pd.Series([10, 1, 19, -5])
     >>> os=orca.Series([10, 1, 19, -5])
     >>> ps.between([1,2,4,5],[15,10,4,5])
@@ -1018,12 +921,7 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
   - `sort_values`函数
 
   Orca的`sort_values`函数仅支持
-  ```Python    
-  >>> import pandas as pd
-  >>> import numpy as np
-  >>> import orca
-  >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
+  ```Python
   >>> ps=pd.Series([10, 1, 19, -5, np.nan])
   >>> os=orca.Series([10, 1, 19, -5, np.nan])
   >>> ps.sort_values()
@@ -1181,10 +1079,6 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
     pandas和Orca的内存表支持以下操作，而Orca的分区表不支持：
     
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> ps = pd.Series([0,1,2,3,4], index=['a','b','c','d','e'])
     >>> os = orca.Series([0, 1, 2, 3, 4], index=['a', 'b', 'c', 'd', 'e'])
     >>> ps[['a','b','a']]
@@ -1206,10 +1100,6 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
     pandas和Orca的内存表可以这样设置一列，而Orca的分区表不支持：
     
     ```Python
-    >>> import pandas as pd
-    >>> import orca
-    >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
-
     >>> df = pd.DataFrame({"a": [1,2,3]}, index=[0,1,2])
     >>> df
     # output
