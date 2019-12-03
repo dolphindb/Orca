@@ -508,5 +508,5 @@ Orca扩展了append函数，支持inplace参数，即允许就地添加数据。
 
 ## 4 小结
 
-对于分布式表，目前Orca还具有一些功能上的限制，例如分区表对应的DataFrame没有RangeIndex的概念、一些函数不支持在分布式表上使用以及修改表中数据的限制等。具体请参考[Orca快速入门指导](https://2xdb.net/dolphindb/orca/blob/master/user_guide.md)。
+对于分布式表，目前Orca还具有一些功能上的限制，例如分区表对应的DataFrame没有RangeIndex的概念、一些函数不支持在分布式表上使用以及修改表中数据的限制等。具体请参考[Orca快速入门指导](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md)。
 
