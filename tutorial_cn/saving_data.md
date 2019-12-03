@@ -1,4 +1,18 @@
-本文介绍如何使用`append`方法，`to_csv`方法与`save_table`函数来向DolphinDB添加数据。
+# Orca写数据教程
+
+Orca项目在DolphinDB之上实现了pandas API，使用户能更高效地分析处理海量数据。与pandas相比，Orca具备以下显著优势：
+
+- 更灵活的选择
+
+   Orca不仅能像pandas一样在内存中进行计算，将DatFrame中的数据导出到磁盘，也能随时将DataFrame的数据以及计算结果追加到DolphinDB的数据表中，为后续的数据查询、分析提供参考。
+
+- 更优异的性能
+
+   当数据量非常大而又需要保存数据时，在pandas中可以将整个DataFrame的数据保存到磁盘，在下一次运行Python程序时，用户再重新将磁盘上的数据加载到内存，这一做法无疑需要在导入和导出操作上耗费大量时间。而Orca对数据的存储与计算过程均进行了优化，用户只需在程序结束前将数据写入到DolphinDB数据表，在下一次运行Python程序时，用户无须重新将整个csv文件导入到内存，也可以立刻进行分析和计算操作。
+   
+本文介绍如何通过Orca将数据写到DolphinDB数据表。
+
+Orca提供`append`方法、`to_csv`方法与`save_table`函数来向DolphinDB添加数据。
 
 DolphinDB中的表分为内存表，普通磁盘表，磁盘分区表和DFS表。
 

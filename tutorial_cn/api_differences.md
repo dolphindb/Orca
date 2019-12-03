@@ -298,7 +298,7 @@
   |where|用NaN填充不符合过滤条件的值|
   |mask|用NaN填充符合过滤条件的值|
 
-  orca.DataFrame对象还以下函数：
+  orca.DataFrame对象还具备以下函数：
 
   |函数|描述|
   |:---|:---|
@@ -901,11 +901,8 @@
 
 #### 4.3.7 Reshaping, sorting
 
-Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提供排序的功能，将NaN值视为最小值处理。
+Orca目前支持`sort_values`函数，该函数仅支持ascending参数。在排序中，Orca将NaN值视为最小值处理。
 
-  - `sort_values`函数
-
-  Orca的`sort_values`函数仅支持
   ```Python
   >>> ps=pd.Series([10, 1, 19, -5, np.nan])
   >>> os=orca.Series([10, 1, 19, -5, np.nan])
