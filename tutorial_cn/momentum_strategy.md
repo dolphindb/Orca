@@ -23,8 +23,8 @@ price_data = load_price_data(df)
 
 **注意**：以上代码使用了Orca的两个扩展功能。
 
-1. Orca支持在条件过滤语句中使用逗号代替&，在某些场景下会更高效，参见[教程](#)。
-2. Orca的`groupby`函数提供了lazy参数，配合`transform`函数使用能够实现DolphinDB的context by功能，参见[教程](#)。
+1. Orca支持在条件过滤语句中使用逗号代替&，在某些场景下会更高效，参见[教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#过滤时用逗号代替符号)。
+2. Orca的`groupby`函数提供了lazy参数，配合`transform`函数使用能够实现DolphinDB的context by功能，参见[教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#如何实现dolphindb的context-by语句)。
 
 步骤 2：为动量策略生成投资组合。
 
@@ -80,7 +80,7 @@ ports = form_portfolio(start_date, end_date, tradables, holding_days, groups, 2)
 daily_rtn = price_data.loc[price_data.date.between(start_date, end_date), ['date', 'PERMNO', 'RET']]
 ```
 
-**注意**：以上代码使用了Orca的扩展功能，即，允许`filter`, `transform`等高阶函数，接受一个表示DolphinDB函数或脚本的字符串。参见[教程](#)。
+**注意**：以上代码使用了Orca的扩展功能，即，允许`filter`, `transform`等高阶函数，接受一个表示DolphinDB函数或脚本的字符串。参见[教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#高阶函数)。
 
 步骤3：计算我们的投资组合中的每支股票随后的21天利润/损失。投资组合形成日后21天关闭股票。
 
@@ -134,6 +134,6 @@ cumulative_return.plot()
 plt.show()
 ```
 
-**注意**：`plot`函数会将整个DataFrame所对应的DolphinDB表下载到客户端，然后对齐绘图。在使用时应当注意数据量，避免大量的网络传输带来的性能问题。参见[教程](#)。
+**注意**：`plot`函数会将整个DataFrame所对应的DolphinDB表下载到客户端，然后对齐绘图。在使用时应当注意数据量，避免大量的网络传输带来的性能问题。参见[教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#减少to_pandas和from_pandas的调用)。
 
-[点此](https://2xdb.net/dolphindb/orca/blob/master/momentum.py)查看完整的代码。关于如何用DolphinDB脚本实现这个策略，请参考[官方范例](http://www.dolphindb.cn/cn/examples/Example11Momentumstrategy.html)。
+[点此](https://github.com/dolphindb/Orca/blob/master/examples/momentum.py)查看完整的代码。关于如何用DolphinDB脚本实现这个策略，请参考[官方范例](http://www.dolphindb.cn/cn/examples/Example11Momentumstrategy.html)。
