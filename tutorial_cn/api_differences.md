@@ -3,7 +3,7 @@
 由于DolphinDB是一款相对成熟的高性能分布式时序数据库，其底层对一些方法的处理机制已经成型，这就决定了Orca在某些细节方面会与pandas存在差异。为了方便用户更快地了解和掌握Orca，本文按照以下几个模块来系统地介绍Orca与pandas存在的差异。
 
 - [1 数据类型的差异](#1-数据类型的差异)
-- [2 通用函数的差异](#2-通用计算函数的差异)
+- [2 通用函数的差异](#2-通用函数的差异)
 - [3 Input/output的差异](#3-inputoutput的差异)
 - [4 Series、DataFrame的差异](#4-seriesdataframe的差异)
   - [4.1 Series和DataFrame的创建与修改](#41-series和dataframe的创建与修改)
@@ -12,7 +12,7 @@
 - [5 Index Objects的差异](#5-index-objcts的差异)
 - [6 GroupBy的差异](#6-groupby的差异)
 - [7 Resampling的差异](#7-resampling的差异)
-- [8 Orca分区表的特殊差异](#8-Orca分区表的特殊差异)
+- [8 Orca分区表的特殊差异](#8-orca分区表的特殊差异)
 
 ### 1 数据类型的差异
 
@@ -50,7 +50,7 @@
 
   - `save_table`函数
 
-    该函数的具体意义及用法请参见[Orca写数据教程](https://2xdb.net/dolphindb/Orca/blob/master/%E5%86%99%E6%95%B0%E6%8D%AE%E6%95%99%E7%A8%8B.md)。
+    该函数的具体意义及用法请参见[Orca写数据教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/saving_data.md)。
 
 ### 3 Input/output的差异
 
@@ -104,26 +104,11 @@
 
     - db_handle, table_name以及partition_columns参数
 
-      Orca的`read_csv`还支持db_handle, table_name和partition_columns这3个参数，这些参数用于在导入数据的时通过指定DolphinDB的数据库和表等相关信息，将数据导入到DolphinDB的分区表，关于这几个参数的具体用法与示例请参见[Orca写数据教程](https://2xdb.net/dolphindb/Orca/blob/master/%E5%86%99%E6%95%B0%E6%8D%AE%E6%95%99%E7%A8%8B.md)。
+      Orca的`read_csv`还支持db_handle, table_name和partition_columns这3个参数，这些参数用于在导入数据的时通过指定DolphinDB的数据库和表等相关信息，将数据导入到DolphinDB的分区表，关于这几个参数的具体用法与示例请参见[Orca分区表的特殊差异](#8-Orca分区表的特殊差异)。
 
   - `read_table`函数
 
-    在pandas中，`read_table`函数用于导入一个表格形式的文件。在Orca中，`read_table`函数用于导入一个[DolphinDB的分区表](https://github.com/dolphindb/Tutorials_CN/blob/master/database.md)。
-    
-    例如，假设DolphinDB Server上已有数据库和表如下：
-    
-    ```
-    tdata=table(1..5 as id, rand(2.0,5) as value)
-    db=database('dfs://testRead',VALUE,1..5)
-    tb=db.createPartitionedTable(tdata,`tb1,`id)
-    tb.append!(tdata)
-    ```
-    
-    其中，数据库名称为"dfs://testRead"，创建的分区表名为"tb1"。我们可以通过`read_table`函数将一个分区表加载到Python应用程序中，存放在一个Orca的DataFrame对象里。
-    
-    ```Python
-    odfs=orca.read_table("dfs://testRead","tb1")
-    ```
+    在pandas中，`read_table`函数用于导入一个表格形式的文件。在Orca中，`read_table`函数用于导入一个[DolphinDB的分区表](https://github.com/dolphindb/Tutorials_CN/blob/master/database.md)。关于该函数的具体用法与示例请参见[Orca分区表的特殊差异](#8-Orca分区表的特殊差异)。
 
 ### 4 Series、DataFrame的差异
 
@@ -646,7 +631,7 @@
     >>> os.apply("(x->x+1)")
     ```
 
-    关于这三个函数的具体限制，请参见[Orca使用教程高阶函数部分](https://2xdb.net/dolphindb/Orca/blob/master/Orca%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B.md#%E9%AB%98%E9%98%B6%E5%87%BD%E6%95%B0)。
+    关于这三个函数的具体限制，请参见[Orca使用教程高阶函数部分](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#%E9%AB%98%E9%98%B6%E5%87%BD%E6%95%B0)。
 
   - `groupby`函数
   
@@ -829,7 +814,7 @@
 
     - group_num参数
 
-      表示排名的分组数，参考DolphinDB文档中的[`rank`函数](https://www.dolphindb.cn/cn/help/rank.html)。
+      表示排名的分组数，参考DolphinDB文档中的[rank](https://www.dolphindb.cn/cn/help/rank.html)函数。
 
     在计算时，pandas的`rank`函数会把重复的排名取平均值，而Orca中两个重复的元素具有相同的排名。在遇到NaN时，pandas返回NaN，而Orca将NaN值视为最小值。
 
@@ -1052,9 +1037,7 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
 
 #### 8.1 Orca的分区表
 
-  pandas作为全内存计算的分析工具，无法解决当数据量过大时带来的内存不足，计算效率低下等问题。
-  
-  DolphinDB是一个分布式时序数据库，并且内置了丰富的计算和分析功能。它可以将TB级的海量数据存储在多台物理机器上，充分利用CPU，对海量数据进行高性能分析计算。
+  pandas作为全内存计算的分析工具，无法解决当数据量过大时带来的内存不足，计算效率低下等问题。DolphinDB是一个分布式时序数据库，并且内置了丰富的计算和分析功能。它可以将TB级的海量数据存储在多台物理机器上，充分利用CPU，对海量数据进行高性能分析计算。
   
   Orca作为基于DolphinDB开发的分布式pandas接口，其最大的优势就是在语法和pandas保持一致的前提下很好地解决了pandas的瓶颈：大数据场景下的性能问题。而这一问题的解决，则依赖于[DolphinDB分区表](https://github.com/dolphindb/Tutorials_CN/blob/master/database.md)。在Orca中，我们也引入Orca分区表的概念。
 
@@ -1062,9 +1045,107 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
 
   - `read_csv`函数
 
-    在本文[第3节](#3-inputoutput的差异)中曾提及，指定partitioned参数为True会将数据以分区的方式导入。
+     在本文[第3节](#3-inputoutput的差异)中曾提及，指定partitioned参数为True会将数据以分区的方式导入DolphinDB。下面，我们对第3节中提到的关于分区表的参数加以说明：
+      
+     DolphinDB支持通过多种方式[将数据导入DolphinDB数据库](https://github.com/dolphindb/Tutorials_CN/blob/master/import_data.md)，Orca在调用`read_csv`函数时指定db_handle, table_name以及partition_columns参数，本质上是调用DolphinDB的[loadTextEx](https://www.dolphindb.cn/cn/help/loadTextEx.html)函数，通过这种方式，我们可以直接将数据直接导入DolphinDB的[DFS表](https://github.com/dolphindb/Tutorials_CN/blob/master/database.md#2-dolphindb%E5%88%86%E5%8C%BA%E5%92%8C%E5%9F%BA%E4%BA%8Empp%E6%9E%B6%E6%9E%84%E7%9A%84%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8%E7%9A%84%E5%8C%BA%E5%88%AB)。
+     
+     **示例**     
+     
+     下面我们通过执行DolphinDB脚本生成模拟数据，并保存为csv文件，以下的脚本中'YOUR_DIR'表示用户保存csv文件的路径。
+            
+     ```dolphindb
+     rows=100
+     tdata=table(rand(`a`b`c`d`e, rows) as type, rand(100, rows) as value)
+     saveText(tdata, YOUR_DIR+"/testImport.csv")
+     ```
+          
+     根据模拟数据，我们在DolphinDB服务端创建一个DFS数据库：
+          
+     ```dolphindb
+     dbPath="dfs://demoDB"
+     login('admin', '123456')
+     if(existsDatabase(dbPath))
+         dropDatabase(dbPath)
+     db=database(dbPath, VALUE, `a`b`c`d`e)
+     ```
+    
+     > 请注意：以上两段脚本需要在DolphinDB服务端执行，在Python客户端中则可以通过DolphinDB Python API执行脚本。
+     
+     在Python客户端中调用Orca的`read_csv`函数，指定数据库db_handle为DFS数据库"dfs://demoDB"，指定表名table_name为"tb1"和进行分区的列partition_columns为"type"，将数据导入到DolphinDB分区表，并返回一个表示DolphinDB数据表的对象给df，用于后续计算。
+     
+     ```Python
+     >>> df = orca.read_csv(path=data_dir+"/testImport.csv", dtype={"type": "SYMBOL", "value": np.float64}, db_handle="dfs://demoDB", table_name="tb1", partition_columns="type")
+     >>> df
+     # output
+     <'dolphindb.orca.core.frame.DataFrame' object representing a column in a DolphinDB segmented table>
+     ```    
+    
+     将上述过程整合成的Python中可执行的脚本如下：
+     
+     ```Python
+     >>> s = orca.default_session()
+     >>> data_dir = "/dolphindb/database" # e.g. data_dir
+     >>> create_csv = """
+     rows=100
+     tdata=table(rand(`a`b`c`d`e, rows) as type, rand(100.0, rows) as value)
+     saveText(tdata, "{YOUR_DIR}"+"/testImport.csv")""".format(YOUR_DIR= data_dir)
+     >>> dfsDatabase = "dfs://demoDB"
+     >>> create_database = """
+     dbPath='{dbPath}'
+     login('admin', '123456')
+     if(existsDatabase(dbPath))
+         dropDatabase(dbPath)
+     db=database(dbPath, VALUE, `a`b`c`d`e)
+     """.format(dbPath=dfsDatabase)
+     >>> s.run(create_csv)
+     >>> s.run(create_database)
+     >>> df=orca.read_csv(path=data_dir+"/testImport.csv", dtype={"type": "SYMBOL", "value": np.float64},
+                          db_handle=dfsDatabase, table_name="tb1", partition_columns="type")
+     ```       
 
-  - 通过`read_table`函数指定数据库和表导入分区表
+     上述脚本中，我们使用的`defalut_session`实际上就是通过`orca.connect`函数创建的会话，在Python端，我们可以通过这个会话与DolphinDB服务端进行交互。关于更多功能，请参见[DolphinDB Python API](https://github.com/dolphindb/python3_api_experimental)。
+
+     > 请注意：在通过`read_csv`函数指定数据库导入数据之前，需要确保在DolphinDB服务器上已经创建了对应的数据库。`read_csv`函数根据指定的数据库，表名和分区字段导入数据到DolphinDB数据库中，若表存在则追加数据，若表不存在则创建表并且导入数据。
+
+  - `read_table`函数
+
+    通过`read_table`函数指定DolphinDB数据库和表名来使用DolphinDB数据表的数据。需要注意的是，`read_table`函数要求所要导入的数据库和表在DolphinDB服务器上已经存在，若只存在数据库和没有创建表，则不能将数据成功导入到Python中。
+
+    **示例**
+    
+    假设DolphinDB Server上已有数据库和表如下：
+    
+    ```dolphindb
+    tdata=table(1..5 as id, rand(2.0,5) as value)
+    db=database('dfs://testRead',VALUE,1..5)
+    tb=db.createPartitionedTable(tdata,`tb1,`id)
+    tb.append!(tdata)
+    ```
+    
+    其中，数据库名称为"dfs://testRead"，创建的分区表名为"tb1"。我们可以通过`read_table`函数将一个分区表加载到Python应用程序中，存放在一个Orca的DataFrame对象里。
+    
+    ```Python
+    >>> df = orca.read_table("dfs://testRead","tb1")
+    ```
+
+    将上述过程整合成的Python中可执行的脚本如下：
+     
+     ```Python
+     >>> s = orca.default_session()
+     >>> dfsDatabase = 'dfs://testRead'
+     >>> tableName = "tb1"
+     >>> create_partitioned_table = """
+     tdata=table(1..5 as id, rand(2.0,5) as value)
+     dbPath='{dbPath}'
+     if(existsDatabase(dbPath))
+         dropDatabase(dbPath)
+     db=database(dbPath,VALUE,1..5)
+     tb=db.createPartitionedTable(tdata,`{tbName},`id)
+     tb.append!(tdata)
+     """.format(dbPath=dfsDatabase, tbName=tableName)
+     >>> s.run(create_partitioned_table)
+     >>> df = orca.read_table(dfsDatabase, tableName)
+     ```
 
 #### 8.2 Orca分区表的特殊差异
 
@@ -1072,7 +1153,7 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
 
   - `all`，`any`和`median`函数
   
-  pandas和Orca的内存表进行group by之后支持调用`all`,`any`和`median`函数，Orca的分区表则不支持。
+    pandas和Orca的内存表进行group by之后支持调用`all`,`any`和`median`函数，Orca的分区表则不支持。
 
   - 对非整数类型的index重复选择
 
