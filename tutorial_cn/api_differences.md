@@ -1002,7 +1002,15 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
 
 ### 7 Resampling的差异
 
-  Orca的`resample`函数目前仅支持rule和on两个参数。其中freq可以指定以下Date Offset：
+  Orca支持`resample`函数，该函数目前支持的参数如下：
+
+  |参数|说明|
+  |:----|:----|
+  |rule|DateOffset，可以是字符串或者是dateoffset对象|
+  |on|时间列，采用该列进行重采样|
+  |level|字符串或整数，对于MultiIndex，采用level指定的列进行重采样|
+
+  Orca支持的DateOffset如下：
 
   |Date Offset|Frequency String|
   |:---|:---|
@@ -1045,7 +1053,7 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
 
   - `read_csv`函数
 
-     在本文[第3节](#3-inputoutput的差异)中曾提及，指定partitioned参数为True会将数据以分区的方式导入DolphinDB。下面，我们对第3节中提到的关于分区表的参数加以说明：
+     在本文[第3节](#3-inputoutput的差异)中曾提及，指定partitioned参数为True会将数据以分区的方式导入DolphinDB。下面，我们对第3节中提到的关于分区表的参数加以说明。
       
      DolphinDB支持通过多种方式[将数据导入DolphinDB数据库](https://github.com/dolphindb/Tutorials_CN/blob/master/import_data.md)，Orca在调用`read_csv`函数时指定db_handle, table_name以及partition_columns参数，本质上是调用DolphinDB的[loadTextEx](https://www.dolphindb.cn/cn/help/loadTextEx.html)函数，通过这种方式，我们可以直接将数据直接导入DolphinDB的[DFS表](https://github.com/dolphindb/Tutorials_CN/blob/master/database.md#2-dolphindb%E5%88%86%E5%8C%BA%E5%92%8C%E5%9F%BA%E4%BA%8Empp%E6%9E%B6%E6%9E%84%E7%9A%84%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8%E7%9A%84%E5%8C%BA%E5%88%AB)。
      
@@ -1207,4 +1215,4 @@ Orca目前仅支持`sort_values`函数，且该函数仅支持ascending参数提
     2  3  20.0
     ```
 
-  以上列出的差异仅供参考，也欢迎Orca的使用着和贡献着提出你的意见和建议，Orca将在我们的共同努力之下不断完善。
+  以上列出的差异仅供参考，我们欢迎你在使用Orca的同时，通过[GitHub issues](https://github.com/dolphindb/Orca/issues)给我们反馈。Orca将在我们的共同努力之下不断完善。

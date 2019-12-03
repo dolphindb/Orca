@@ -49,7 +49,7 @@ infos=db.createTable(t3,`infos).append!(t3)
 在Orca中通过`connect`函数连接到DolphinDB服务器：
 
 ```python
->>> import dolphindb.orca
+>>> import dolphindb.orca as orca
 >>> orca.connect("localhost",8848,"admin","123456")
 ```
 
@@ -330,7 +330,36 @@ Orca支持`resample`函数，可以对常规时间序列数据重新采样和频
 |on|时间列，采用该列进行重采样|
 |level|字符串或整数，对于MultiIndex，采用level指定的列进行重采样|
 
-Orca支持pandas的所有dateoffset。具体可查看[https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#dateoffset-objects](https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#dateoffset-objects)。
+Orca支持的DateOffset如下：
+
+  |Date Offset|Frequency String|
+  |:---|:---|
+  |BDay or BusinessDay|'B'|
+  |WeekOfMonth|'WOM'|
+  |LastWeekOfMonth|'LWOM'|
+  |MonthEnd|'M'|
+  |MonthBegin|'MS'|
+  |BMonthEnd or BusinessMonthEnd|'BM'|
+  |BMonthBegin or BusinessMonthBegin|'BMS'|
+  |SemiMonthEnd|'SM'|
+  |SemiMonthBegin|'SMS'|	
+  |QuarterEnd|'Q'|
+  |QuarterBegin|'QS'|
+  |BQuarterEnd|'BQ'|
+  |BQuarterBegin|'BQS'|
+  |FY5253Quarter|'REQ'|
+  |YearEnd|'A'|
+  |YearBegin|'AS' or 'BYS'|
+  |BYearEnd|'BA'|
+  |BYearBegin|'BAS'|
+  |FY5253|'RE'|
+  |Day|'D'|
+  |Hour|'H'|
+  |Minute|'T' or 'min'|
+  |Second|'S'|
+  |Milli|'L' or 'ms'|	
+  |Micro|'U' or 'us'|	
+  |Nano|'N'|
 
 例如，对trades中的数据重新采样，每3分钟计算一次：
 
