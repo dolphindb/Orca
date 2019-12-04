@@ -315,13 +315,13 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
 
     @staticmethod
     def _generate_joiner(left_var_name, right_var_name,
-                         left_index_columns, right_index_columns, 
+                         left_join_columns, right_join_columns, 
                          how="outer", sort=False, use_right_index=False):
         """
         Returns the index_list and from_clause used in binary operations on
         Frames with different indices.
         """
-        if len(left_index_columns) != len(right_index_columns):
+        if len(left_join_columns) != len(right_join_columns):
             raise ValueError("cannot join with no overlapping index names")
         if sort:
             methods = {"left_semi": "slsj", "left": "slj", "right": "slj",
@@ -333,17 +333,12 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         if method is None:
             raise ValueError(f"do not recognize join method {how}")
 
-        left_index_literals = to_dolphindb_literal(left_index_columns)
-        right_index_literals = to_dolphindb_literal(right_index_columns)
-        # if method == "lsj" or method == "lj":
-        #     if use_right_index:
-        #         index_list = (f"tmp1.{col} as {col}" for col in right_index_columns)
-        #     else:
-        #         index_list = (f"tmp1.{col} as {col}" for col in left_index_columns)
+        left_join_literal = to_dolphindb_literal(left_join_columns)
+        right_join_literal = to_dolphindb_literal(right_join_columns)
         if how == "right":
-            index_list = (f"tmp2.{col} as {col}" for col in right_index_columns)
+            index_list = (f"tmp2.{col} as {col}" for col in right_join_columns)
         elif how in ("left", "left_semi"):
-            index_list = (f"tmp1.{col} as {col}" for col in left_index_columns)
+            index_list = (f"tmp1.{col} as {col}" for col in left_join_columns)
         else:
             index_list = (
                 f"iif(isValid(tmp1.{left_col}), "
@@ -351,16 +346,16 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
                 f"tmp2.{right_col}) "
                 f"as {right_col if use_right_index else left_col}"
                 for left_col, right_col
-                in zip(left_index_columns, right_index_columns)
+                in zip(left_join_columns, right_join_columns)
             )
         if how == "right":
             from_clause = f"{method}({right_var_name} as tmp2, " \
                           f"{left_var_name} as tmp1, " \
-                          f"{right_index_literals}, {left_index_literals})"
+                          f"{right_join_literal}, {left_join_literal})"
         else:
             from_clause = f"{method}({left_var_name} as tmp1, " \
                           f"{right_var_name} as tmp2, " \
-                          f"{left_index_literals}, {right_index_literals})"
+                          f"{left_join_literal}, {right_join_literal})"
         return index_list, from_clause
 
     def _concat_script(self, merged_columns, ignore_index, inner_join=False):

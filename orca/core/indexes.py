@@ -92,6 +92,9 @@ class IndexOpsMixin(ArithOpsMixin, LogicalOpsMixin, metaclass=abc.ABCMeta):
     def is_unique(self):
         return self.nunique == len(self)
 
+    def _unary_op(self, *args, **kwargs):
+        return ArithOpsMixin._unary_op(self, *args, **kwargs)
+
     def _binary_op(self, *args, **kwargs):
         return ArithOpsMixin._binary_op(self, *args, **kwargs)
 

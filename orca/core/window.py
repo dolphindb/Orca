@@ -7,7 +7,7 @@ from pandas.tseries.frequencies import to_offset
 
 from .indexes import DatetimeIndex
 from .internal import _InternalAccessor
-from .operator import DataFrameLike, SeriesLike, WindowOpsMixin, EwmOpsMixin
+from .operator import DataFrameLike, EwmOpsMixin, SeriesLike, WindowOpsMixin
 from .utils import (
     _scale_nanos, check_key_existence, dolphindb_numeric_types,
     dolphindb_temporal_types, get_orca_obj_from_script, sql_select,
@@ -240,3 +240,41 @@ class DataFrameEwm(DataFrameLike, Ewm):
 class SeriesEwm(SeriesLike, Ewm):
 
     pass
+
+
+class WindowJoiner(object):
+
+    def __init__(self, session, method, window, left_odf, right_odf,
+                 left_join_columns, right_join_columns):
+        self._session = session
+        self._method = method
+        self._window = window
+        self._left_odf = left_odf
+        self._right_odf = right_odf
+        self._left_join_columns = left_join_columns
+        self._right_join_columns = right_join_columns
+
+    def aggregate(self, func):
+        if not isinstance(func, dict):
+            raise TypeError("func must be dictionary")
+        agg_functions = []
+        for key, value in func.items():
+            if not isinstance(key, str):
+                raise TypeError("Every key in func must be a string")
+            if not isinstance(value, str):
+                raise TypeError("Every value in func must be a string")
+            agg_functions.append(f"{value} as {key}")
+        session = self._session
+        method = self._method
+        window = self._window
+        left_var_name = self._left_odf._var_name
+        right_var_name = self._right_odf._var_name
+        left_join_literal = to_dolphindb_literal(self._left_join_columns)
+        right_join_literal = to_dolphindb_literal(self._right_join_columns)
+        agg_functions_script = ",".join(agg_functions)
+        script = f"{method}({left_var_name}, {right_var_name}, {window}, " \
+                 f"<[{agg_functions_script}]>, " \
+                 f"{left_join_literal}, {right_join_literal})"
+        return get_orca_obj_from_script(session, script, index_map=None)
+
+    agg = aggregate

@@ -25,6 +25,7 @@ from .utils import (ORCA_INDEX_NAME_FORMAT, _infer_axis, _infer_level,
                     is_dolphindb_integral, is_dolphindb_scalar,
                     is_dolphindb_vector, sql_select, to_dolphindb_literal,
                     to_dolphindb_type_name)
+from .window import WindowJoiner
 
 
 class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
@@ -75,7 +76,9 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                     odf.attach_index(index)
             _Frame.__init__(self, odf, session)
         self._name = None
+        self._update_columns()        
 
+    def _update_columns(self):
         if self._column_index_level > 1:
             columns = pd.MultiIndex.from_tuples(self._column_index)
         else:
@@ -406,6 +409,33 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
 
     # Combining / joining / merging
 
+    @staticmethod
+    def _get_left_right_data_join_columns(left, right, on, left_on, right_on, left_index, right_index):
+        """
+        Return (left_data_columns, left_join_columns, right_data_columns, right_join_columns)
+        """
+        left_data_columns = left._data_columns
+        right_data_columns = right._data_columns
+        if on is not None:
+            if left_on is not None or right_on is not None:
+                # TODO: pandas.errors.MergeError
+                raise ValueError('Can only pass argument "on" OR "left_on" and "right_on", not a combination of both.')
+            left_join_columns = right_join_columns = _try_convert_iterable_to_list(on)
+            _, left_data_columns = check_key_existence(left_join_columns, left_data_columns)
+            _, right_data_columns = check_key_existence(right_join_columns, right_data_columns)
+        else:    # on is None, left_on is None and right_on is None
+            if left_index:
+                left_join_columns = left._index_columns
+            else:
+                left_join_columns, left_data_columns = check_key_existence(left_on, left_data_columns)
+            if right_index:
+                right_join_columns = right._index_columns
+            else:
+                right_join_columns, right_data_columns = check_key_existence(right_on, right_data_columns)
+        if len(left_join_columns) != len(right_join_columns):
+            raise ValueError("len(right_on) must equal len(left_on)")
+        return left_data_columns, left_join_columns, right_data_columns, right_join_columns
+
     def join(self, other, on=None, how="left", lsuffix="", rsuffix="", sort=False):
         return self.merge(other, how, left_on=on, left_index=(not on),
                           right_index=True, suffixes=(lsuffix, rsuffix),
@@ -426,27 +456,9 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
             raise TypeError("Both lsuffix and rsuffix must be strings")
         left_ref = self.compute()
         right_ref = right.compute()
-        left_data_columns = left_ref._data_columns
-        right_data_columns = right_ref._data_columns
-        if on is not None:
-            if left_on is not None or right_on is not None:
-                # TODO: pandas.errors.MergeError
-                raise ValueError('Can only pass argument "on" OR "left_on" and "right_on", not a combination of both.')
-            left_join_columns = right_join_columns = _try_convert_iterable_to_list(on)
-            _, left_data_columns = check_key_existence(left_join_columns, left_data_columns)
-            _, right_data_columns = check_key_existence(right_join_columns, right_data_columns)
-        else:    # on is None, left_on is None and right_on is None
-            if left_index:
-                left_join_columns = left_ref._index_columns
-            else:
-                left_join_columns, left_data_columns = check_key_existence(left_on, left_data_columns)
-            if right_index:
-                right_join_columns = right_ref._index_columns
-            else:
-                right_join_columns, right_data_columns = check_key_existence(right_on, right_data_columns)
-
-        if len(left_join_columns) != len(right_join_columns):
-            raise ValueError("len(right_on) must equal len(left_on)")
+        left_data_columns, left_join_columns, right_data_columns, right_join_columns = \
+            self._get_left_right_data_join_columns(
+                left_ref, right_ref, on, left_on, right_on, left_index, right_index)
 
         index_list, from_clause = self._generate_joiner(
             left_ref._var_name, right_ref._var_name,
@@ -499,14 +511,30 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
             )
 
         script = sql_select(select_list, from_clause)
-        # print(script)    # TODO: debug info
         if not left_index and not right_index:
             index_map = None
-        # elif how == "right" or not right_index:
-        #     index_map = right_ref._index_map
         else:
             index_map = left_ref._index_map
         return DataFrame._get_from_script(self._session, script, index_map=index_map)
+
+    def merge_window(self, right, window_lower, window_upper, prevailing=False, on=None,
+                     left_on=None, right_on=None, left_index=False, right_index=False):
+        if not isinstance(right, (DataFrame, Series)):
+            raise TypeError('other must be a DataFrame or a Series')
+        if isinstance(right, Series) and right.name is None:
+            raise TypeError('Other Series must have a name')
+        if not is_dolphindb_integral(window_lower) or not is_dolphindb_integral(window_upper):
+            raise TypeError("Both window_lower and window_upper must be integers")
+        left_ref = self.compute()
+        right_ref = right.compute()
+        _, left_join_columns, __, right_join_columns = \
+            self._get_left_right_data_join_columns(
+                left_ref, right_ref, on, left_on, right_on, left_index, right_index)
+
+        window = f"{window_lower}:{window_upper}"
+        method = "pwj" if prevailing else "wj"
+        return WindowJoiner(self._session, method, window, left_ref._internal,
+                            right_ref._internal, left_join_columns, right_join_columns)
 
     # Methods that are trying to modify the data
     def append(self, other, ignore_index=False, verify_integrity=False, sort=None, inplace=False):
@@ -629,6 +657,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         if has_new_key:
             new_odf = _InternalFrame(session, self._var, index_map=self._index_map, data_columns=new_data_columns)
             self._internal = new_odf
+        self._update_columns()
 
     # Reindexing / selection / label manipulation
 
@@ -658,6 +687,8 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 return DataFrame._with_where_expr(self._where_expr, new_odf)
 
     def rename(self, mapper=None, index=None, columns=None, axis='index', copy=True, inplace=False, level=None, errors='ignore'):
+        if inplace and self._segmented:
+            raise ValueError("A segmented table is not allowed to be renamed inplace")
         axis = _infer_axis(None, axis)
         if axis == 0:
             index = mapper
@@ -689,6 +720,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 return self._with_where_expr(self._where_expr, odf, session=self._session)
             else:
                 self._internal.rename(columns=columns, level=level)
+                self._update_columns()
 
     def reindex(self, labels=None, index=None, columns=None, axis=None, method=None, copy=True, level=None, fill_value=None, limit=None, tolerance=None):
         if axis is not None and (index is not None or columns is not None):

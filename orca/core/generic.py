@@ -6,7 +6,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from .common import default_session
+from .common import default_session, _set_verbose
 from .datetimes import Timestamp
 from .frame import DataFrame
 from .indexes import DatetimeIndex, Index, IndexOpsMixin
@@ -20,6 +20,10 @@ from .utils import (ORCA_INDEX_NAME_FORMAT, _infer_dtype, _to_data_column,
 
 def connect(host, port, user="admin", passwd="123456", session=default_session()):
     session.connect(host, port, user, passwd)
+
+
+def set_verbose(verbose=False):
+    _set_verbose(verbose)
 
 
 def read_pickle(path, compression="infer", session=default_session(),  *args, **kwargs):

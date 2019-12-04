@@ -266,6 +266,8 @@ class ArithOpsMixin(metaclass=abc.ABCMeta):
     __rmod__ = _orca_reversed_binary_op("mod")
     __rpow__ = _orca_reversed_binary_op("pow")
 
+    __neg__ = _orca_unary_op("neg", numeric_only=False)
+
     def __divmod__(self, other):
         return self // other, self % other
 
@@ -295,6 +297,10 @@ class ArithOpsMixin(metaclass=abc.ABCMeta):
             return self._binary_op(other, func)
         else:
             raise NotImplementedError()
+    
+    @abc.abstractmethod
+    def _unary_op(self, func, numeric_only):
+        return StatOpsMixin._unary_op(self, func, numeric_only)
 
 
 class GroupByOpsMixin(metaclass=abc.ABCMeta):
@@ -368,6 +374,24 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
     def rank(self, axis=0, method='min', na_option='top', ascending=True, pct=False, rank_from_zero=False, group_num=None):
         func = _check_rank_arguments(axis, method, na_option, ascending, pct, rank_from_zero, group_num)
         return self._contextby_op(func, numeric_only=False)
+
+    def ols(self, y, x, column_names, intercept=True):
+        y, _ = check_key_existence(y, self._data_columns)
+        x, _ = check_key_existence(x, self._data_columns)
+        if len(y) != 1:
+            raise ValueError("y must be a single column")
+        y_script = y[0]
+        x_script = ",".join(x)
+        intercept = "true" if intercept else "false"
+        column_names_literal = to_dolphindb_literal(column_names)
+
+        script = f"ols({y_script}, ({x_script}), {intercept}) as {column_names_literal}"
+        orderby_list = self._orderby_list if self._sort else None
+
+        script = sql_select([script], self._var_name, self._where_expr,
+                            groupby_list=self._groupby_list, orderby_list=orderby_list,
+                            asc=self._ascending)
+        return self._run_groupby_script("ols", script, self._result_index_map)
 
     def aggregate(self, func, *args, **kwargs):
         return self._groupby_op(func, False)
@@ -476,18 +500,19 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
 
     def _run_groupby_script(self, func, script, groupkeys):
         groupby_size = (func == "size")
+        session = self._session
         index = groupkeys if self._as_index or groupby_size else []
         # print(script)    # TODO: debug info
         if isinstance(func, list):
             column_index = ([(col, func_name) for func_name in func]
                             for col in self._data_columns if col not in self._groupkeys)
             column_index = list(itertools.chain(*column_index))
-            return get_orca_obj_from_script(self._session, script, index, column_index=column_index)
+            return get_orca_obj_from_script(session, script, index, column_index=column_index)
         if func == "ohlc":
             column_index = ([(col, "open"), (col, "high"), (col, "low"), (col, "close")] for col in self._data_columns)
             column_index = list(itertools.chain(*column_index))
-            return get_orca_obj_from_script(self._session, script, index, column_index=column_index)
-        data = get_orca_obj_from_script(self._session, script, index)
+            return get_orca_obj_from_script(session, script, index, column_index=column_index)
+        data = get_orca_obj_from_script(session, script, index)
         if groupby_size:
             s = data["count"]
             s.rename(None, inplace=True)
@@ -516,7 +541,6 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
         script = sql_select(select_list, self._var_name, self._where_expr,
                             groupby_list=self._groupby_list, orderby_list=orderby_list,
                             asc=self._ascending)
-        # print(script)    # TODO: debug info
         return self._run_groupby_script(func, script, self._result_index_map)
 
     @abc.abstractmethod

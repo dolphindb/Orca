@@ -10,6 +10,18 @@ def default_session():
     return _ddb_session
 
 
+_orca_verbose = False
+
+
+def _set_verbose(verbose):
+    global _orca_verbose
+    _orca_verbose = verbose
+
+
+def _get_verbose():
+    return _orca_verbose
+
+
 class CopiedTableWarning(Warning):
     pass
 

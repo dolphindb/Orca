@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import is_list_like
 
-from .common import AttachDefaultIndexWarning, warn_not_dolphindb_identifier
+from .common import AttachDefaultIndexWarning, warn_not_dolphindb_identifier, _get_verbose
 from .utils import (ORCA_INDEX_NAME_FORMAT, _get_uuid_ddb, _to_column_index,
                     _to_index_map, _to_numpy_dtype, check_key_existence,
                     dolphindb_temporal_types, is_dolphindb_identifier,
@@ -92,7 +92,8 @@ class _ConstantSP(object):
     def run_script(cls, session, script):
         obj_id = _get_uuid_ddb()
         var_name = "orca_obj_" + obj_id
-        print(script)    # TODO: debug info
+        if _get_verbose():
+            print(script)
         session.run(f"&{var_name} = ({script})")
         return cls(session, obj_id)
 
@@ -118,7 +119,8 @@ class _ConstantSP(object):
         table_name = self.var_name
         script = sql_update(table_name, column_names, new_values,
                             from_table_joiner, where_expr, contextby_list)
-        # print(script)    # TODO: debug info
+        if _get_verbose():
+            print(script)
         session.run(script)
         self._update_metadata()
 
@@ -192,6 +194,8 @@ class _ConstantSP(object):
         old_names_literal = to_dolphindb_literal(old_names)
         new_names_literal = to_dolphindb_literal(new_names)
         session, var_name = self._session, self.var_name
+        if _get_verbose():
+            print(f"rename!({var_name}, {old_names_literal}, {new_names_literal})")
         session.run(f"rename!({var_name}, {old_names_literal}, {new_names_literal})")
 
     def reset_with_script(self, script):
@@ -201,6 +205,8 @@ class _ConstantSP(object):
 
     def append(self, script):
         session, var_name = self._session, self.var_name
+        if _get_verbose():
+            print(f"append!({var_name}, {script})")
         session.run(f"append!({var_name}, {script})")
         self._update_metadata()
 
@@ -447,6 +453,9 @@ class _InternalFrame(object):
         else:
             self._column_index_names = column_index_names
 
+        self._update_data_select_list()
+
+    def _update_data_select_list(self):
         self._data_select_list = [f"{self.var_name}.{col}" for col in self.data_columns]
 
     def __len__(self):
@@ -726,6 +735,7 @@ class _InternalFrame(object):
                 # new_column_index_names.append(name)
         self._data_columns = new_data_columns
         self._column_index = new_column_index
+        self._update_data_select_list()
 
     # def attach_index(self, index):
     #     from .indexes import RangeIndex
