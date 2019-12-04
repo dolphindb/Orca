@@ -13,16 +13,18 @@ from .common import CopiedTableWarning, MixedTypeWarning, default_session
 from .indexes import DatetimeIndex, Index, MultiIndex, RangeIndex
 from .indexing import _iLocIndexer, _LocIndexer
 from .internal import _ConstantSP, _InternalFrame
-from .operator import (ArithExpression, ArithOpsMixin,
-                                BooleanExpression, DataFrameLike, IOOpsMixin,
-                                LogicalOpsMixin, StatOpsMixin, ContextByExpression)
+from .operator import (ArithExpression, ArithOpsMixin, BooleanExpression,
+                       ContextByExpression, DataFrameLike, IOOpsMixin,
+                       LogicalOpsMixin, StatOpsMixin)
 from .series import Series
-from .utils import (_infer_axis, _unsupport_columns_axis, _merge_where_expr, _to_index_map,
-                             _to_numpy_dtype, _try_convert_iterable_to_list, _infer_level,
-                             check_key_existence, is_dolphindb_integral,
-                             is_dolphindb_scalar, is_dolphindb_vector,
-                             sql_select, to_dolphindb_literal,
-                             to_dolphindb_type_name, is_dolphindb_identifier)
+from .utils import (ORCA_INDEX_NAME_FORMAT, _infer_axis, _infer_level,
+                    _merge_where_expr, _to_column_index, _to_index_map,
+                    _to_numpy_dtype, _try_convert_iterable_to_list,
+                    _unsupport_columns_axis, check_key_existence,
+                    dolphindb_literal_types, is_dolphindb_identifier,
+                    is_dolphindb_integral, is_dolphindb_scalar,
+                    is_dolphindb_vector, sql_select, to_dolphindb_literal,
+                    to_dolphindb_type_name)
 
 
 class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
@@ -31,9 +33,10 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         "_internal",
         "_where_expr",
         "_index",
+        "_columns",
         "_is_snapshot",
         "_name",
-        "_session"
+        "_session",
     ]
     _internal_names_set: Set[str] = set(_internal_names)
 
@@ -72,6 +75,14 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                     odf.attach_index(index)
             _Frame.__init__(self, odf, session)
         self._name = None
+
+        if self._column_index_level > 1:
+            columns = pd.MultiIndex.from_tuples(self._column_index)
+        else:
+            columns = pd.Index([idx[0] for idx in self._column_index])
+        if self._internal.column_index_names is not None:
+            columns.names = self._internal.column_index_names
+        self._columns = columns
 
     def __getitem__(self, key):
         if key is None:
@@ -184,13 +195,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         orca.Index
             The column labels of each column.
         """
-        if self._column_index_level > 1:
-            columns = pd.MultiIndex.from_tuples(self._column_index)
-        else:
-            columns = pd.Index([idx[0] for idx in self._column_index])
-        if self._internal.column_index_names is not None:
-            columns.names = self._internal.column_index_names
-        return columns
+        return self._columns
         # return Index(self._data_columns)
 
     @columns.setter
@@ -477,7 +482,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
             )
         elif right_index and not left_index:
             select_list = itertools.chain(
-                left_ref._index_columns,
+                (f"tmp1.{col} as {col}" for col in left_ref._index_columns),
                 get_join_list("tmp1", lsuf, left_ref._data_columns, left_join_columns),
                 get_join_list("tmp2", rsuf, right_data_columns)
             )
@@ -497,8 +502,8 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         # print(script)    # TODO: debug info
         if not left_index and not right_index:
             index_map = None
-        elif how == "right" or not right_index:
-            index_map = right_ref._index_map
+        # elif how == "right" or not right_index:
+        #     index_map = right_ref._index_map
         else:
             index_map = left_ref._index_map
         return DataFrame._get_from_script(self._session, script, index_map=index_map)
@@ -716,7 +721,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
     def _reindex_index(self, index):
         assert len(self._index_columns) <= 1, "Index should be single column or not set."
         index_column = self._index_columns[0]
-        if index_column == "ORCA_INDEX_LEVEL_0_":
+        if index_column == ORCA_INDEX_NAME_FORMAT(0):
             index_column = None
         labels = DataFrame(pd.DataFrame(index=pd.Index(list(index), name=index_column)))
         return self.join(labels, how="right")
@@ -837,6 +842,40 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
     # def pivot(self, index=None, columns=None, values=None):
     #     script = sql_select()
 
+    def transpose(self, copy=True, *args, **kwargs):
+        # TODO: support MultiIndex
+        if not copy:
+            raise ValueError("copy must be True for an Orca DataFrame to be transposed")
+        if self._is_mixed_type():
+            raise ValueError("A DataFrame with mixed-type columns cannot be transposed")
+        if self._column_index_level > 1 or len(self._index_columns) > 1:
+            raise ValueError("Only DataFrames with a one-level column and index can be transposed")
+
+        session = self._session
+        ref = self.compute()
+
+        new_index = np.array([col_idx[0] for col_idx in self._column_index])
+        new_index_var = _ConstantSP.upload_obj(session, new_index)
+        new_index_map = _to_index_map([self._columns.name])
+        new_index_column_name = new_index_map[0][0]
+        new_column_script = sql_select(ref._index_columns, ref._var_name, ref._where_expr, is_exec=True)
+        new_columns = session.run(new_column_script)
+        new_column_index_names = [self._index.name]
+        new_column_index = _to_column_index(new_columns)
+
+        script = sql_select(ref._data_columns, ref._var_name, ref._where_expr)
+        script = f"{script}.matrix().transpose().table()"
+        var = _ConstantSP.run_script(session, script)
+        var._sql_update([new_index_column_name], [new_index_var._var_name])
+        odf = _InternalFrame(
+            session, var, index_map=new_index_map, column_index=new_column_index,
+            column_index_names=new_column_index_names)
+        return DataFrame(odf, session=session)
+
+    @property
+    def T(self):
+        return self.transpose()
+
     def xs(self, key, axis=0, level=None, drop_level=True):
         if is_dolphindb_scalar(key):
             key = (key,)
@@ -896,6 +935,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 result[i] = self.loc[r, c]
         return result
 
+    # TODO: @property and @lazyproperty
     def _is_mixed_type(self):
         return len(set(self._ddb_dtypes[self._data_columns])) > 1
 

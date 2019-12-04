@@ -1,7 +1,7 @@
 import datetime
 import itertools
-from typing import Iterable
 import warnings
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -9,12 +9,13 @@ import pandas as pd
 from .common import default_session
 from .datetimes import Timestamp
 from .frame import DataFrame
-from .indexes import IndexOpsMixin, Index, DatetimeIndex
+from .indexes import DatetimeIndex, Index, IndexOpsMixin
 from .internal import _ConstantSP, _InternalFrame
 from .operator import ArithExpression, BooleanExpression
 from .series import Series
-from .utils import (_unsupport_columns_axis, _infer_dtype, to_dolphindb_literal, _to_data_column,
-                             to_dolphindb_type_string)
+from .utils import (ORCA_INDEX_NAME_FORMAT, _infer_dtype, _to_data_column,
+                    _unsupport_columns_axis, to_dolphindb_literal,
+                    to_dolphindb_type_string)
 
 
 def connect(host, port, user="admin", passwd="123456", session=default_session()):
@@ -178,7 +179,7 @@ def read_stata(filepath_or_buffer, convert_dates=True, convert_categoricals=True
     return DataFrame(pdf, session=session)
 
 
-def from_pandas(self, pdf, session=default_session()):
+def from_pandas(pdf, session=default_session()):
     if isinstance(pdf, pd.DataFrame):
         return DataFrame(pdf, session=session)
     elif isinstance(pdf, pd.Series):
@@ -447,8 +448,8 @@ def concat(objs, axis=0, join='outer', join_axes=None, ignore_index=False, keys=
     if len(merged_columns) == 0 and ignore_index:
         # a trivial case where the returned df contains one RangeIndex and no data columns
         df_length = sum(map(len, objs))
-        script = f"table(0..{df_length-1} as ORCA_INDEX_LEVEL_0_)"
-        return DataFrame._get_from_script(session, script, index_map=[('ORCA_INDEX_LEVEL_0_', None)])
+        script = f"table(0..{df_length-1} as {ORCA_INDEX_NAME_FORMAT(0)})"
+        return DataFrame._get_from_script(session, script, index_map=[(ORCA_INDEX_NAME_FORMAT(0), None)])
     table_selections = ",".join(obj._concat_script(merged_columns, ignore_index, inner_join) for obj in objs)
     index_map = None if ignore_index else objs[0]._index_map
     script = f"unionAll([{table_selections}], false)"    # TODO: partitioned=true or false?
@@ -500,6 +501,7 @@ def notna(obj):
 
 isnull = isna
 notnull = notna
+
 
 def to_datetime(arg, session=default_session(), *args, **kwargs):
     if isinstance(arg, DataFrame):

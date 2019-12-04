@@ -7,12 +7,12 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import is_list_like
 
-from .common import (AttachDefaultIndexWarning,
-                              warn_not_dolphindb_identifier)
-from .utils import (_get_uuid_ddb, _to_index_map, _to_numpy_dtype,
-                             check_key_existence, dolphindb_temporal_types,
-                             is_dolphindb_identifier, is_dolphindb_vector,
-                             sql_select, sql_update, to_dolphindb_literal)
+from .common import AttachDefaultIndexWarning, warn_not_dolphindb_identifier
+from .utils import (ORCA_INDEX_NAME_FORMAT, _get_uuid_ddb, _to_column_index,
+                    _to_index_map, _to_numpy_dtype, check_key_existence,
+                    dolphindb_temporal_types, is_dolphindb_identifier,
+                    is_dolphindb_vector, sql_select, sql_update,
+                    to_dolphindb_literal)
 
 IndexMap = Tuple[str, Optional[Tuple[str, ...]]]
 
@@ -92,7 +92,7 @@ class _ConstantSP(object):
     def run_script(cls, session, script):
         obj_id = _get_uuid_ddb()
         var_name = "orca_obj_" + obj_id
-        # print(script)    # TODO: debug info
+        print(script)    # TODO: debug info
         session.run(f"&{var_name} = ({script})")
         return cls(session, obj_id)
 
@@ -178,9 +178,9 @@ class _ConstantSP(object):
                     return Index(self, name=name, session=session)
                 else:
                     self.reset_with_script(
-                        f"table({index.var_name} as ORCA_INDEX_LEVEL_0_, "
+                        f"table({index.var_name} as {ORCA_INDEX_NAME_FORMAT(0)}, "
                         f"each(first, values({script})) as ORCA_EXPRESSION_COLUMN)")
-                    index_map = [("ORCA_INDEX_LEVEL_0_", None)]
+                    index_map = [(ORCA_INDEX_NAME_FORMAT(0), None)]
                     data_columns = ["ORCA_EXPRESSION_COLUMN"]
                     odf = _InternalFrame(session, self, index_map, data_columns)
                     return Series(odf, name=name, session=session)
@@ -232,7 +232,7 @@ class _ConstantSP(object):
         form, var_name = self._form, self.var_name
         size = len(self)
         if form == ddb.settings.DF_TABLE:
-            column_names = [f"ORCA_INDEX_LEVEL_0_"]
+            column_names = [ORCA_INDEX_NAME_FORMAT(0)]
             new_values = [f"0..{size-1}"]
             try:
                 self._sql_update(column_names, new_values)
@@ -244,7 +244,7 @@ class _ConstantSP(object):
                 else:
                     raise ex
         elif form == ddb.settings.DF_VECTOR:
-            script = f"table({var_name}, 0..{size-1} as ORCA_INDEX_LEVEL_0_)"
+            script = f"table({var_name}, 0..{size-1} as {ORCA_INDEX_NAME_FORMAT(0)})"
             self.reset_with_script(script)
         return True
 
@@ -414,7 +414,7 @@ class _InternalFrame(object):
         else:
             self._is_any_vector = False
         if index_map is None or index_map == []:     # TODO: create RangeIndex
-            index_map = [("ORCA_INDEX_LEVEL_0_", None)] if var.attach_default_index() else []
+            index_map = [(ORCA_INDEX_NAME_FORMAT(0), None)] if var.attach_default_index() else []
         else:
             self.check_index_map_validity(index_map)
 
@@ -428,7 +428,7 @@ class _InternalFrame(object):
             self._data_columns = data_columns
 
         if column_index is None:
-            self._column_index = [(col,) for col in self._data_columns]
+            self._column_index = _to_column_index(self._data_columns)
         else:
             assert len(column_index) == len(self._data_columns)
             assert all(isinstance(i, tuple) for i in column_index), column_index
@@ -484,10 +484,7 @@ class _InternalFrame(object):
                                 else column if is_dolphindb_identifier(column)
                                 else f"ORCA_COLUMN_LEVEL_{i}_"
                             for i, column in enumerate(columns)]
-        if isinstance(columns, pd.MultiIndex):
-            column_index = columns.tolist()
-        else:
-            column_index = [(col,) for col in columns]
+        column_index = _to_column_index(columns)
         column_index_names = columns.names
 
         index_map = _to_index_map(pdf.index)
@@ -505,8 +502,7 @@ class _InternalFrame(object):
             elif ex_msg.startswith("All columns must have the same size"):
                 raise RuntimeError(ex_msg + "; You might have passed duplicated column names")
             else:
-                raise e
-        # return cls(session, var, index_map, data_columns, column_index, column_index_names, pdf.index)
+                raise
         return cls(session, var, index_map, data_columns, column_index, column_index_names)
 
     @staticmethod
@@ -652,7 +648,7 @@ class _InternalFrame(object):
 
     def set_columns(self, columns):
         assert len(columns) == len(self.data_columns)
-        column_index = [col if isinstance(col, tuple) else (col,) for col in columns]
+        column_index = _to_column_index(columns)
         if len(column_index) != len(set(column_index)):
             raise ValueError("DolphinDB does not support duplicated column names")
         if isinstance(columns, pd.Index):
@@ -700,7 +696,7 @@ class _InternalFrame(object):
         other_script = sql_select(select_list, other._var_name)
         self.var.append(other_script)
         if ignore_index:
-            index_map = [("ORCA_INDEX_LEVEL_0_", None)] if self.var.attach_default_index() else []
+            index_map = [(ORCA_INDEX_NAME_FORMAT(0), None)] if self.var.attach_default_index() else []
             self._index_map = index_map
 
     def rename(self, columns, level):

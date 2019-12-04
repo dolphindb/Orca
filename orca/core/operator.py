@@ -11,12 +11,13 @@ from pandas.tseries.frequencies import to_offset
 from .common import warn_apply_callable
 from .datetimes import Timestamp
 from .internal import _ConstantSP, _InternalAccessor, _InternalFrame
-from .utils import (
-    _infer_axis, _infer_level, _merge_where_expr, _scale_nanos, _to_freq,
-    _to_index_map, _try_convert_iterable_to_list, _unsupport_columns_axis,
-    check_key_existence, dolphindb_numeric_types, dolphindb_temporal_types,
-    get_orca_obj_from_script, is_dolphindb_scalar, is_dolphindb_uploadable,
-    sql_select, to_dolphindb_literal)
+from .utils import (ORCA_INDEX_NAME_FORMAT, _infer_axis, _infer_level,
+                    _merge_where_expr, _scale_nanos, _to_freq,
+                    _try_convert_iterable_to_list, _unsupport_columns_axis,
+                    check_key_existence, dolphindb_numeric_types,
+                    dolphindb_temporal_types, get_orca_obj_from_script,
+                    is_dolphindb_scalar, is_dolphindb_uploadable, sql_select,
+                    to_dolphindb_literal)
 
 
 def _default_axis(obj):
@@ -385,7 +386,7 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
 
     @staticmethod
     def _get_groupby_list_orderby_list_and_index_map(groupby_columns, index_names, sort, resample):
-        index_columns = [f"ORCA_INDEX_LEVEL_{i}_" for i in range(len(index_names))]
+        index_columns = [ORCA_INDEX_NAME_FORMAT(i) for i in range(len(index_names))]
         groupby_list = [f"{groupby_column} as {index_column}"
                         for groupby_column, index_column in zip(groupby_columns, index_columns)]
         if sort:
@@ -774,9 +775,9 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
             corr_table = _ConstantSP.run_script(session, script)
             corr_var_name = corr_table._var_name
             session.run(f"rename!({corr_var_name}, {numeric_columns_literal}); "
-                        f"update {corr_var_name} set ORCA_INDEX_LEVEL_0_ = {numeric_columns_literal}")
+                        f"update {corr_var_name} set {ORCA_INDEX_NAME_FORMAT(0)} = {numeric_columns_literal}")
             corr_table._update_metadata()
-            index_map = [("ORCA_INDEX_LEVEL_0_", None)]
+            index_map = [(ORCA_INDEX_NAME_FORMAT(0), None)]
             data_columns = numeric_columns
             odf = _InternalFrame(session, corr_table, index_map=index_map, data_columns=data_columns)
             return DataFrame(odf, session=session)

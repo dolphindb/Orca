@@ -15,9 +15,9 @@ from pandas.tseries.offsets import (
 from .indexes import DatetimeIndex
 from .internal import _ConstantSP, _InternalAccessor
 from .operator import DataFrameLike, GroupByOpsMixin, SeriesLike
-from .utils import (_infer_level, _scale_nanos, _to_index_map,
-                             check_key_existence, dolphindb_numeric_types,
-                             dolphindb_temporal_types, sql_select)
+from .utils import (_infer_level, _scale_nanos, check_key_existence,
+                    dolphindb_numeric_types, dolphindb_temporal_types,
+                    sql_select)
 
 
 class Resampler(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):

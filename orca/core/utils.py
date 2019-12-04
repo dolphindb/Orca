@@ -36,6 +36,11 @@ dolphindb_temporal_types = [
     ddb.settings.DT_NANOTIMESTAMP
 ]
 
+dolphindb_literal_types = [
+    ddb.settings.DT_STRING,
+    ddb.settings.DT_SYMBOL
+]
+
 _TYPE_TO_FREQ = {
     ddb.settings.DT_DATE: "D",
     ddb.settings.DT_MONTH: "MS",
@@ -47,6 +52,10 @@ _TYPE_TO_FREQ = {
     ddb.settings.DT_NANOTIME: "N",
     ddb.settings.DT_NANOTIMESTAMP: "N"
 }
+
+
+def ORCA_INDEX_NAME_FORMAT(i):
+    return f"ORCA_INDEX_LEVEL_{i}_"
 
 
 def _to_freq(dtype):
@@ -331,11 +340,11 @@ def _to_index_map(index, all_columns=None):
         The generated index map
     """
     from .indexes import Index, MultiIndex
-    assert isinstance(index, (Index, pd.Index, list))
+    assert isinstance(index, (Index, pd.Index, list, np.ndarray))
     if isinstance(index, (MultiIndex, pd.MultiIndex)):
         if index.names is None:
-            return [(f"ORCA_INDEX_LEVEL_{i}_", None)    # TODO: the index names might conflict with the existing ones
-                     for i in range(len(index.levels))]
+            return [(ORCA_INDEX_NAME_FORMAT(i), None)    # TODO: the index names might conflict with the existing ones
+                    for i in range(len(index.levels))]
         else:
             index_columns = index.names
     elif isinstance(index, (Index, pd.Index)):
@@ -343,14 +352,23 @@ def _to_index_map(index, all_columns=None):
     else:
         index_columns = index
     if all_columns is None:
-        return [(f"ORCA_INDEX_LEVEL_{i}_" if name is None else name,
+        return [(ORCA_INDEX_NAME_FORMAT(i) if name is None else name,
                  name if name is None or isinstance(name, tuple) else (name,))
                 for i, name in enumerate(index_columns)]
     else:
         return [(name if name is not None and name not in all_columns
-                      else f"ORCA_INDEX_LEVEL_{i}_",
+                      else ORCA_INDEX_NAME_FORMAT(i),
                  name if name is None or isinstance(name, tuple) else (name,))
                 for i, name in enumerate(index_columns)]
+
+
+def _to_column_index(columns):
+    from .indexes import Index, MultiIndex
+    assert isinstance(columns, (Index, pd.Index, list, np.ndarray))
+    if isinstance(columns, pd.MultiIndex):
+        return columns.tolist()
+    else:
+        return [col if isinstance(col, tuple) else (col,) for col in columns]
 
 
 def _unsupport_columns_axis(self, axis):
