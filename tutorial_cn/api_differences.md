@@ -746,7 +746,7 @@
   |mean|平均值|
   |median|中位数|
   |min|最小值|
-  |mode|返回出现最多的行|
+  |mode|众数|
   |pct_change|百分比变化率|
   |prod|返回乘积|
   |product|返回乘积|
@@ -1052,9 +1052,13 @@ Orca目前支持`sort_values`函数，该函数仅支持ascending参数。在排
 
      在本文[第3节](#3-inputoutput的差异)中曾提及，指定partitioned参数为True会将数据以分区的方式导入DolphinDB。下面，我们对第3节中提到的关于分区表的参数加以说明。
       
-     DolphinDB支持通过多种方式[将数据导入DolphinDB数据库](https://github.com/dolphindb/Tutorials_CN/blob/master/import_data.md)，Orca在调用`read_csv`函数时指定db_handle, table_name以及partition_columns参数，本质上是调用DolphinDB的[loadTextEx](https://www.dolphindb.cn/cn/help/loadTextEx.html)函数，通过这种方式，我们可以直接将数据直接导入DolphinDB的[DFS表](https://github.com/dolphindb/Tutorials_CN/blob/master/database.md#2-dolphindb%E5%88%86%E5%8C%BA%E5%92%8C%E5%9F%BA%E4%BA%8Empp%E6%9E%B6%E6%9E%84%E7%9A%84%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8%E7%9A%84%E5%8C%BA%E5%88%AB)。
+     DolphinDB支持通过多种方式[将数据导入DolphinDB数据库](https://github.com/dolphindb/Tutorials_CN/blob/master/import_data.md)，Orca在调用`read_csv`函数时指定db_handle, table_name以及partition_columns参数，本质上是调用DolphinDB的[loadTextEx](https://www.dolphindb.cn/cn/help/loadTextEx.html)函数，通过这种方式，我们可以直接将数据直接导入DolphinDB的分区表。
+
+     > 请注意：DolphinDB的分区表可以保存在本地磁盘，也可以保存在dfs上，磁盘分区表与分布式表的差异就在于分布式表的数据库路径以"dfs://"开头，而磁盘分区表的数据库路径是本地的一个绝对路径。为了避免涉及本地路径，以下的示例以分布式表为主。
      
-     **示例**     
+     **示例**  
+
+     请注意只有启用enableDFS=1的集群环境或者DolphinDB单例模式才能使用分布式表。   
      
      下面我们通过执行DolphinDB脚本生成模拟数据，并保存为csv文件，以下的脚本中'YOUR_DIR'表示用户保存csv文件的路径。
             
