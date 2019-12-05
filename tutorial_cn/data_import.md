@@ -228,7 +228,7 @@ db=database(dbPath, RANGE, datehour(2017.01.01 00:00:00+(0..24)*3600))
 
 ### 2.2 `read_table`函数
 
-Orca提供`read_table`函数，通过该函数指定DolphinDB数据库和表名来加载DolphinDB数据表的数据，可以用于加载DolphinDB的磁盘表、磁盘分区表和分布式表。若您已在DOlphinDB中创建了数据库和表，则可以直接在Orca中调用该函数加载存放在DolphinDB服务端中的数据，`read_csv`函数支持的参数如下:
+Orca提供`read_table`函数，通过该函数指定DolphinDB数据库和表名来加载DolphinDB数据表的数据，可以用于加载DolphinDB的磁盘表、磁盘分区表和分布式表。若您已在DOlphinDB中创建了数据库和表，则可以直接在Orca中调用该函数加载存放在DolphinDB服务端中的数据，`read_table`函数支持的参数如下:
 
 |参数|用法|
 |:--|:--|
@@ -290,10 +290,9 @@ Orca提供`from_pandas`函数，该函数接受一个pandas的DataFrame作为参
 >>> import numpy as np
 
 >>> pdf = pd.DataFrame(np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]]),  columns=['a', 'b', 'c'])
->>> odf = orca.from_pandas(df)
+>>> odf = orca.from_pandas(pdf)
 ```
 
 ## 3 对其它格式文件的支持
 
-对于其它数据格式的导入，Orca也提供了与pandas类似的接口。这些方法包括：`read_pickle`, `read_fwf`, `read_msgpack`, `read_clipboard`, `read_excel`, `read_json`, `json_normalize`,
-`build_table_schema`, `read_html`, `read_hdf`, `read_feather`, `read_parquet`, `read_sas`, `read_sql_table`, `read_sql_query`, `read_sql`, `read_gbq`, `read_stata`。
+对于其它数据格式的导入，Orca也提供了与pandas类似的接口。这些方法包括：`read_pickle`, `read_fwf`, `read_msgpack`, `read_clipboard`, `read_excel`, `read_json`, `json_normalize`,`build_table_schema`, `read_html`, `read_hdf`, `read_feather`, `read_parquet`, `read_sas`, `read_sql_table`, `read_sql_query`, `read_sql`, `read_gbq`, `read_stata`。
