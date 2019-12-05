@@ -71,7 +71,7 @@
     当engine参数设置为‘dolphindb’时，Orca的`read_csv`函数目前支持的参数如下：
 
     ```Python
-    read_csv(path, sep=',', delimiter=None, names=None,  index_col=None,engine='dolphindb', usecols=None, squeeze=False, prefix=None, dtype=None, partitioned=True, db_handle=None, table_name=None, partition_columns=None, *args, **kwargs):
+    read_csv(path, sep=',', delimiter=None, names=None,  index_col=None,engine='dolphindb', usecols=None, squeeze=False, prefix=None, dtype=None, partitioned=True, db_handle=None, table_name=None, partition_columns=None, *args, **kwargs)
     ```
 
     - dtype参数
@@ -285,7 +285,7 @@
 
   由于Orca的优势在于对批量数据读写与计算，因此目前在Conversion方面的功能并不完善，现在仅支持`Series.to_numpy`这一功能。
 
-#### 4.3.2 Indexing, iteration
+#### 4.3.3 Indexing, iteration
 
   以下函数可用于orca.DataFrame对象和orca.Series对象：
 
@@ -501,7 +501,7 @@
 
   - `loc`和`iloc`暂不支持对MultiIndex的访问
 
-#### 4.3.3 Binary operator functions
+#### 4.3.4 Binary operator functions
 
   除了[combine](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.combine.html#pandas.DataFrame.combine)和[combine_first](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.combine_first.html#pandas.DataFrame.combine_first)函数之外，Orca支持pandas提供的所有[二元函数](https://pandas.pydata.org/pandas-docs/stable/reference/frame.html#binary-operator-functions)。但是，Orca的DataFrame或者Series在进行四则运算时，除了本文第2.2小节所提及的差异之外，在四则运算进行的方式上也存在一定差异。
 
@@ -600,7 +600,7 @@
     # raise error
     ```
 
-#### 4.3.4 Function application, GroupBy & window
+#### 4.3.5 Function application, GroupBy & window
 
   以下函数可用于orca.DataFrame对象和orca.Series对象：
 
@@ -635,7 +635,7 @@
 
   - `groupby`函数
   
-    Orca的groupby函数目前支持的参数如下：
+    Orca的`groupby`函数目前支持的参数如下：
 
     ```Python
     DataFrame.groupby(self, by=None, level=None, as_index=True, sort=True, squeeze=False, ascending=True, **kwargs)
@@ -644,7 +644,7 @@
 
   - `rolling`函数
 
-    Orca的rolling函数目前支持window和on参数。在进行rolling时，若遇到空值，pandas在对应位置返回NaN，而Orca返回上一次计算的结果。
+    Orca的`rolling`函数目前支持window和on参数。在进行rolling时，若遇到空值，pandas在对应位置返回NaN，而Orca返回上一次计算的结果。
 
     ```Python
     >>> pdf = pd.DataFrame({'id': np.arange(1, 6, 1), 'B': [0, 1, 2, np.nan, 4]})
@@ -720,7 +720,7 @@
     |std|标准差|
     |var|方差|
 
-#### 4.3.5 Computations/descriptive stats的差异
+#### 4.3.6 Computations/descriptive stats的差异
 
   以下函数可用于orca.DataFrame对象和orca.Series对象：
 
@@ -874,7 +874,7 @@
     # raise error
     ```
 
-#### 4.3.6 Reindexing/selection/label manipulation的差异
+#### 4.3.7 Reindexing/selection/label manipulation的差异
 
   以下函数可用于orca.DataFrame对象和orca.Series对象：
 
@@ -899,7 +899,7 @@
   |reset_index|重置index|
   |set_index|设置index|
 
-#### 4.3.7 Reshaping, sorting
+#### 4.3.8 Reshaping, sorting
 
 Orca目前支持`sort_values`函数，该函数仅支持ascending参数。在排序中，Orca将NaN值视为最小值处理。
 
@@ -925,9 +925,11 @@ Orca目前支持`sort_values`函数，该函数仅支持ascending参数。在排
   dtype: float64
   ```
 
-#### 4.3.8 Serialization / IO / conversion
+#### 4.3.9 Serialization / IO / conversion
 
   Orca支持pandas所支持的所有[序列化相关函数](https://pandas.pydata.org/pandas-docs/stable/reference/frame.html#serialization-io-conversion)，并提供一个`to_pandas`函数，该函数将一个Orca对象转化为pandas的对象。
+
+  其中，Orca的`to_csv`实现与pandas有所区别，具体请参见[Orca写数据教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/saving_data.md#1-%E5%B0%86%E6%95%B0%E6%8D%AE%E5%AF%BC%E5%87%BA%E5%88%B0%E7%A3%81%E7%9B%98)。
 
 ### 5 Index Objcts的差异
 
@@ -1184,6 +1186,8 @@ Orca目前支持`sort_values`函数，该函数仅支持ascending参数。在排
     a    0
     dtype: int64
     ```
+    
+由于Orca的分区表实现机制的限制，许多对表结构、表数据的修改操作对分区表都是不支持的，例如：
 
   - 以DataFrame的index为基准对齐设置某一列的值
     
@@ -1214,6 +1218,16 @@ Orca目前支持`sort_values`函数，该函数仅支持ascending参数。在排
     0  1  10.0
     1  2   NaN
     2  3  20.0
+    ```
+
+  - 大部分支持inplace参数的函数对Orca的分区表无效
+
+    例如rename函数：
+
+    ```Python
+    >>> df=orca.read_table("dfs://demoDB", "tb1")
+    >>> df.rename(columns={"value": "values"}, inplace=True)
+    raise error:A segmented table is not allowed to be renamed inplace
     ```
 
   以上列出的差异仅供参考，我们欢迎你在使用Orca的同时，通过[GitHub issues](https://github.com/dolphindb/Orca/issues)给我们反馈。Orca将在我们的共同努力之下不断完善。
