@@ -1,4 +1,4 @@
-# Orca对分布式表的操作
+# Orca对DolphinDB分布式表的操作
 
 DolphinDB是一个分布式时序数据库，并且内置了丰富的计算和分析功能。它可以将TB级的海量数据存储在多台物理机器上，充分利用CPU，对海量数据进行高性能分析计算。通过Orca，我们可以在python环境中使用与pandas语法相同的脚本对DolphinDB分布式数据库中的数据进行复杂高效的计算。本教程主要介绍Orca对DolphinDB分布式表的操作。
 

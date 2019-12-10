@@ -1,6 +1,6 @@
-# Orca 数据加载入门教程
+# Orca数据加载教程
 
-本文介绍Orca的各种数据载入方法。
+本文介绍在Orca中加载数据的方法。
 
 - [建立数据库连接](#1-建立数据库连接)
 - [导入数据](#2-导入数据)
@@ -228,7 +228,7 @@ db=database(dbPath, RANGE, datehour(2017.01.01 00:00:00+(0..24)*3600))
 
 ### 2.2 `read_table`函数
 
-Orca提供`read_table`函数，通过该函数指定DolphinDB数据库和表名来加载DolphinDB数据表的数据，可以用于加载DolphinDB的磁盘表、磁盘分区表和分布式表。若您已在DOlphinDB中创建了数据库和表，则可以直接在Orca中调用该函数加载存放在DolphinDB服务端中的数据，`read_table`函数支持的参数如下:
+Orca提供`read_table`函数，通过该函数指定DolphinDB数据库和表名来加载DolphinDB数据表的数据，可以用于加载DolphinDB的磁盘表、磁盘分区表和分布式表。若您已在DolphinDB中创建了数据库和表，则可以直接在Orca中调用该函数加载存放在DolphinDB服务端中的数据，`read_table`函数支持的参数如下:
 
 |参数|用法|
 |:--|:--|
