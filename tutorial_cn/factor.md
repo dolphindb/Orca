@@ -122,28 +122,30 @@ Length: 10000000, dtype: float64
 >>> import time
 
 >>> with Timer() as timer:
-        ask = df["av1"]
-        bid = df["bv1"]
-        p = df["mp"].iloc[0]
-        for i in range(2, 11):
-            ask += df["av" + str(i)] * np.exp(-10 * (i - 1) / p)
-            bid += df["bv" + str(i)] * np.exp(-10 * (i - 1) / p)
-        vol_diff = (0.5 * (bid / ask).log()).compute()
+...     ask = df["av1"]
+...     bid = df["bv1"]
+...     p = df["mp"].iloc[0]
+...     for i in range(2, 11):
+...         ask += df["av" + str(i)] * np.exp(-10 * (i - 1) / p)
+...         bid += df["bv" + str(i)] * np.exp(-10 * (i - 1) / p)
+...     vol_diff = (0.5 * (bid / ask).log()).compute()
+
 >>> timer.elapsed
 # Orca output
 0.6120876730419695
 
 >>> with Timer() as timer:
-        ask = pdf["av1"]
-        bid = pdf["bv1"]
-        p = pdf["mp"].iloc[0]
-        for i in range(2, 11):
-            ask += np.exp(-10 * (i - 1) / p) * pdf["av" + str(i)]
-            bid += np.exp(-10 * (i - 1) / p) * pdf["bv" + str(i)]
-        vol_diff = 0.5 * np.log(bid / ask)
+...     ask = pdf["av1"]
+...     bid = pdf["bv1"]
+...     p = pdf["mp"].iloc[0]
+...     for i in range(2, 11):
+...         ask += np.exp(-10 * (i - 1) / p) * pdf["av" + str(i)]
+...         bid += np.exp(-10 * (i - 1) / p) * pdf["bv" + str(i)]
+...     vol_diff = 0.5 * np.log(bid / ask)
+
 >>> timer.elapsed
 # pandas output
 2.0468595211859792
 ```
 
-因子计算的实现，Orca和pandas都没用使用并行计算。Orca计算速度约为pandas的3倍。
+因子计算的实现，Orca和pandas都没用使用并行计算。Orca计算速度约为pandas的3倍。[点此](https://github.com/dolphindb/Orca/blob/master/examples/factor.py)查看完整的代码。
