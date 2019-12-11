@@ -12,8 +12,6 @@ t.saveText(DATA_DIR + "/data/random.csv")
 
 ## 使用pandas计算因子
 
-在pandas中，若需求DataFram中两个列的累积量比，可以通过如下步骤实现。
-
 ### １.导入数据
 
 ```Python
@@ -41,7 +39,7 @@ t.saveText(DATA_DIR + "/data/random.csv")
 
 ### 2.计算因子
 
-下面计算累积bid和ask量比，其中bid和ask均为表中的列。
+下面计算累积bid和ask量比。其中bv1到bv10是bid的10个档位的量，av1到av10是ask的10个档位的量。
 
 ```Python
 >>> ask = pdf["av1"]
