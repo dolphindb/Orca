@@ -10,11 +10,11 @@ t.saveText(DATA_DIR + "/data/random.csv")
 
 > 请注意，上述脚本需要在DolphinDB服务端执行，在Python客户端中请通过DolphinDB Python API执行脚本生成数据文件。
 
-### 使用pandas计算因子
+## 使用pandas计算因子
 
 在pandas中，若需求DataFram中两个列的累积量比，可以通过如下步骤实现。
 
-#### １.导入数据
+### １.导入数据
 
 ```Python
 >>> import pandas as pd
@@ -39,7 +39,7 @@ t.saveText(DATA_DIR + "/data/random.csv")
 [10000000 rows x 22 columns]
 ```
 
-#### 2.计算因子
+### 2.计算因子
 
 下面计算累积bid和ask量比，其中bid和ask均为表中的列。
 
@@ -67,24 +67,25 @@ t.saveText(DATA_DIR + "/data/random.csv")
 Length: 10000000, dtype: float64
 ```
 
-### 使用Orca计算因子
+## 使用Orca计算因子
 
 在Orca中，对上述过程进行简单修改，即可执行：
 
 - 以非分区方式导入数据
 
-    Orca的分区表不支持通过`iloc`和`loc`函数访问，因此在导入文件时，指定以非分区的方式导入数据。关于Orca分区表的具体限制请参见[Orca分区表的限制](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/api_differences.md#82-orca%E5%88%86%E5%8C%BA%E8%A1%A8%E7%9A%84%E7%89%B9%E6%AE%8A%E5%B7%AE%E5%BC%82)。
+    Orca的分区表不支持通过`iloc`函数访问，因此在导入文件时，需指定partitioned参数为False，以非分区的方式导入数据。关于Orca分区表的具体限制请参见[Orca分区表的限制](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/api_differences.md#82-orca%E5%88%86%E5%8C%BA%E8%A1%A8%E7%9A%84%E7%89%B9%E6%AE%8A%E5%B7%AE%E5%BC%82)。
 
 - 使用numpy库函数的限制
 
     - `np.exp(-10*(i-1)/p)`的计算结果与Orca的Series进行四则运算时，应保证Orca的Series在运算符左侧，numpy的运算结果在运算符右侧。详情参见[教程的说明](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#操作数的顺序)。
-    - 不应使用`np.log(bid/ask)`，而改为对表达式直接调用`log`函数：`(bid/ask).log()`。详情参见[教程的说明](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#避免用numpy函数处理orca对象)。
 
-- Orca采用[惰性求值](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#orca并非总是立刻求值)策略，对于Orca的表达式，调用`compute`函数触发计算。
+    - 不应使用`np.log(bid/ask)`，而应改为对表达式直接调用`log`函数：`(bid/ask).log()`。详情参见[教程的说明](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#避免用numpy函数处理orca对象)。
+
+- Orca采用[惰性求值](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md#orca并非总是立刻求值)策略，对于Orca的表达式，调用`compute`函数触发计算获得最终结果。
 
 下面介绍在Orca中计算该因子的具体步骤。
 
-#### 1.建立数据库连接
+### 1.建立数据库连接
 
 在Orca中通过`connect`函数连接到DolphinDB服务器：
 
@@ -93,14 +94,14 @@ Length: 10000000, dtype: float64
 >>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
 ```
 
-#### 2.导入数据
+### 2.导入数据
 
 ```Python
 >>> DATA_DIR = "/dolphindb/database"  # e.g. data directory
 >>> df = orca.read_csv(DATA_DIR + "/data/random.csv", >>> partitioned=False)
 ```
 
-#### 3.计算因子
+### 3.计算因子
 
 ```Python
 >>> import numpy as np
@@ -113,7 +114,7 @@ Length: 10000000, dtype: float64
 >>> vol_diff = (0.5 * (bid/ask).log()).compute()
 ```
 
-### Orca和pandas运算时间对比
+## Orca和pandas运算时间对比
 
 在脚本添加入如下代码，分别记录Orca与pandas执行脚本所需时间：
 
