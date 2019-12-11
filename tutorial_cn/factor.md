@@ -4,7 +4,7 @@
 
 ```
 n=10000000
-t=table(rand(100.0, n) as bv1, rand(100.0, n) as bv2, rand(100.0, n) as bv3, rand(100.0, n) as bv4, rand(100.0, n) as bv5, rand(100.0, n) as bv6, rand(100.0, n) as bv7, rand(100.0, n) as bv8, rand(100.0, n) as bv9, rand(100.0, n) as bv10, rand(100.0, n) as av1, rand(100.0, n) as av2, rand(100.0, n) as av3, rand(100.0, n) as av4, rand(100.0, n) as av5, rand(100.0, n) as av6, rand(100.0, n) as av7, rand(100.0, n) as av8, rand(100.0, n) as av9, rand(100.0, n) as av10, rand(100.0, n) as mp)
+t=table(rand(100.0, n) as bv1, rand(100.0, n) as bv2, rand(100.0, n) as bv3, rand(100.0, n) as bv4, rand(100.0, n) as bv5, rand(100.0, n) as bv6, rand(100.0, n) as bv7, rand(100.0, n) as bv8, rand(100.0, n) as bv9, rand(100.0, n) as bv10, rand(100.0, n) as av1, rand(100.0, n) as av2, rand(100.0, n) as av3, rand(100.0, n) as av4, rand(100.0, n) as av5, rand(100.0, n) as av6, rand(100.0, n) as av7, rand(100.0, n) as av8, rand(100.0, n) as av9, rand(100.0, n) as av10, rand(100.0, n) as mp, rand(100.0, n) as wp)
 t.saveText(DATA_DIR + "/data/random.csv")
 ```
 
