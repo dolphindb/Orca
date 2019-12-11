@@ -288,6 +288,66 @@ df_x_gt_0 = df.x > 0
 df[df_x_gt_0] = df[df_x_gt_0] + 1
 ```
 
+### 避免用numpy函数处理Orca对象
+
+pandas中经常用numpy函数处理一个DataFrame或Series，例如：
+
+```python
+>>> ps = pd.Series([1,2,3])
+>>> np.log(ps)
+0    0.000000
+1    0.693147
+2    1.098612
+dtype: float64
+```
+
+应该避免在Orca中使用这种写法。因为numpy函数不识别Orca对象，会将Orca对象当成一个一般的类似数组的对象，对它进行遍历计算。这样会带来大量不必要的网络开销，返回的类型也并非一个Orca对象。在某些情况下，还可能抛出难以理解的异常。用户应该避免调用numpy函数处理Orca对象。
+
+Orca对一些常用的计算函数，例如`log`, `exp`等进行了扩展。对于以上pandas脚本，最佳的Orca改写如下：
+
+```python
+>>> os = orca.Series([1,2,3])
+>>> os.log()
+<orca.core.operator.ArithExpression object at 0x000001FE099585C0>
+```
+
+此时，`os.log()`采取了[惰性求值](#orca并非总是立刻求值)策略，返回结果为一个中间表达式，用户可以继续对这个表达式进行四则运算、比较运算、调用数值计算函数，直到真正需要获得计算结果时，才调用`compute`进行计算：
+
+```
+>>> os = orca.Series([1,2,3])
+>>> tmp = os.log()
+>>> tmp += os * 2
+>>> tmp = tmp.exp()
+>>> tmp
+<orca.core.operator.ArithExpression object at 0x000001FE0C374E10>
+>>> tmp.compute()
+0       7.389056
+1     109.196300
+2    1210.286380
+dtype: float64
+```
+
+#### 操作数的顺序
+
+Orca的DataFrame和Series支持与numpy的数值进行四则运算或比较运算，但是有一些限制：numpy的数值必须出现在运算符的右侧：
+
+```python
+>>> p = np.exp(1)
+>>> type(p)
+<class 'numpy.float64'>
+
+>>> s = orca.Series([1,2,3])
+>>> p * s         # Could cause potential problems!
+>>> s * p         # correct expression
+
+>>> p / s         # Could cause potential problems!
+>>> 1 / s * p     # correct expression
+```
+
+这是因为，numpy的数值类型重写了四则运算方法。当numpy的数值出现在运算符左侧时，会调用numpy的运算方法。而numpy的实现没有对Orca对象进行特殊处理。这可能会造成潜在的问题。如果numpy的数值出现在运算符右侧，则调用的是Orca的运算方法，能正确识别numpy数值类型。
+
+如果操作数是Python的内置类型，就没有这个限制。
+
 ### 修改表数据的限制
 
 在DolphinDB中，一个表的列的数据类型无法修改。

@@ -65,7 +65,7 @@ Orca提供`read_csv`函数，用于导入数据集。需要说明的是，Orca�
 
    bool类型，默认为True。该参数为True时，在数据规模达到一定程度时，会将数据导入为分区内存表，如果设置为False，会直接将csv导入为未经分区的DolphinDB普通内存表。
 
-   > 请注意：Orca的分区表与Orca的内存表相比，在操作时也存在许多差异，具体见[Orca分区表的特殊差异](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/api_differences.md#8-orca%E5%88%86%E5%8C%BA%E8%A1%A8%E7%9A%84%E7%89%B9%E6%AE%8A%E5%B7%AE%E5%BC%82)。若您的数据量不是很大，且在使用Orca时对Orca与pandas的一致性要求更高，请尽量不要将数据以分区的方式导入。若您数据量极大，对性能要求极高，则建议您采用分区方式导入数据。
+   > 请注意：Orca的分区表与Orca的内存表相比，在操作时也存在许多差异，具体见[Orca分区表的特殊差异]https://github.com/dolphindb/Orca/blob/master/tutorial_cn/api_differences.md#82-orca%E5%88%86%E5%8C%BA%E8%A1%A8%E7%9A%84%E7%89%B9%E6%AE%8A%E5%B7%AE%E5%BC%82)。若您的数据量不是很大，且在使用Orca时对Orca与pandas的一致性要求更高，请尽量不要将数据以分区的方式导入。若您数据量极大，对性能要求极高，则建议您采用分区方式导入数据。
 
 - db_handle, table_name以及partition_columns参数
 

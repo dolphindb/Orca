@@ -1162,72 +1162,79 @@ Orca目前支持`sort_values`函数，该函数仅支持ascending参数。在排
 
   在DolphinDB中，分区表与内存表存在着一些差异，在Orca中，分区表的操作也存在这诸多限制。
 
-  - `all`，`any`和`median`函数
-  
+  - 对表的计算
+
     pandas和Orca的内存表进行group by之后支持调用`all`,`any`和`median`函数，Orca的分区表则不支持。
-
-  - 对非整数类型的index重复选择
-
-    pandas和Orca的内存表支持以下操作，而Orca的分区表不支持：
     
-    ```Python
-    >>> ps = pd.Series([0,1,2,3,4], index=['a','b','c','d','e'])
-    >>> os = orca.Series([0, 1, 2, 3, 4], index=['a', 'b', 'c', 'd', 'e'])
-    >>> ps[['a','b','a']]
-    # output
-    a    0
-    b    1
-    a    0
-    dtype: int64
-    >>> os[['a','b','a']]
-    # output
-    a    0
-    b    1
-    a    0
-    dtype: int64
-    ```
+  - 对表的访问
+
+    - 不能通过`iloc`和`loc`访问Orca的分区表。
+
+      对于分区表，数据存储并非连续，所以就没有RangeIndex的概念。DolphinDB分区表的各分区之间没有严格顺序关系。因而不能对分区表通过`iloc`访问相应的行。
+  
+    - 对非整数类型的index重复选择
+
+      pandas和Orca的内存表支持以下操作，而Orca的分区表不支持：
+      
+      ```Python
+      >>> ps = pd.Series([0,1,2,3,4], index=['a','b','c','d','e'])
+      >>> os = orca.Series([0, 1, 2, 3, 4], index=['a', 'b', 'c', 'd', 'e'])
+      >>> ps[['a','b','a']]
+      # output
+      a    0
+      b    1
+      a    0
+      dtype: int64
+      >>> os[['a','b','a']]
+      # output
+      a    0
+      b    1
+      a    0
+      dtype: int64
+      ```
+  - 对表结构、表数据的修改 
     
-由于Orca的分区表实现机制的限制，许多对表结构、表数据的修改操作对分区表都是不支持的，例如：
+    由于Orca的分区表实现机制的限制，许多对表结构、表数据的修改操作对分区表都是不支持的，例如：
 
-  - 以DataFrame的index为基准对齐设置某一列的值
-    
-    pandas和Orca的内存表可以这样设置一列，而Orca的分区表不支持：
-    
-    ```Python
-    >>> df = pd.DataFrame({"a": [1,2,3]}, index=[0,1,2])
-    >>> df
-    # output
-    a
-    0  1
-    1  2
-    2  3
+    - 以DataFrame的index为基准对齐设置某一列的值
+      
+      pandas和Orca的内存表可以这样设置一列，而Orca的分区表不支持：
+      
+      ```Python
+      >>> df = pd.DataFrame({"a": [1,2,3]}, index=[0,1,2])
+      >>> df
+      # output
+      a
+      0  1
+      1  2
+      2  3
 
-    >>> ps = pd.Series([10,20,30], index=[0,2,3])
-    >>> os = orca.Series([10,20,30], index=[0,2,3])
-    >>> os
-    # output
-    0    10
-    2    20
-    3    30
-    dtype: int64
+      >>> ps = pd.Series([10,20,30], index=[0,2,3])
+      >>> os = orca.Series([10,20,30], index=[0,2,3])
+      >>> os
+      # output
+      0    10
+      2    20
+      3    30
+      dtype: int64
 
-    >>> df["b"] = s
-    >>> df
-    # output
-    a     b
-    0  1  10.0
-    1  2   NaN
-    2  3  20.0
-    ```
+      >>> df["b"] = s
+      >>> df
+      # output
+      a     b
+      0  1  10.0
+      1  2   NaN
+      2  3  20.0
+      ```
 
-  - 大部分支持inplace参数的函数对Orca的分区表无效
+    - 大部分支持inplace参数的函数对Orca的分区表无效
 
-    例如rename函数：
+      例如rename函数：
 
-    ```Python
-    >>> df=orca.read_table("dfs://demoDB", "tb1")
-    >>> df.rename(columns={"value": "values"}, inplace=True)
-    raise error:A segmented table is not allowed to be renamed inplace
-    ```
+      ```Python
+      >>> df=orca.read_table("dfs://demoDB", "tb1")
+      >>> df.rename(columns={"value": "values"}, inplace=True)
+      raise error:A segmented table is not allowed to be renamed inplace
+      ```
 
   以上列出的差异仅供参考，我们欢迎你在使用Orca的同时，通过[GitHub issues](https://github.com/dolphindb/Orca/issues)给我们反馈。Orca将在我们的共同努力之下不断完善。

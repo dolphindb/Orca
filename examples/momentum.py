@@ -1,6 +1,4 @@
-import orca
-import pandas as pd
-import numpy as np
+import dolphindb.orca as orca
 import matplotlib.pyplot as plt
 
 US = 'C:/DolphinDB/Orca/databases/USstocks.csv'
