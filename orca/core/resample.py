@@ -2,8 +2,6 @@ import abc
 import itertools
 from typing import Iterable
 
-import dolphindb as ddb
-import numpy as np
 from pandas.tseries.frequencies import to_offset
 from pandas.tseries.offsets import (
     FY5253, BDay, BMonthBegin, BMonthEnd, BQuarterBegin, BQuarterEnd,
@@ -12,12 +10,12 @@ from pandas.tseries.offsets import (
     Second, SemiMonthBegin, SemiMonthEnd, Week, WeekOfMonth, YearBegin,
     YearEnd)
 
+from .groupby import GroupByOpsMixin
 from .indexes import DatetimeIndex
 from .internal import _ConstantSP, _InternalAccessor
-from .operator import DataFrameLike, GroupByOpsMixin, SeriesLike
+from .operator import DataFrameLike, SeriesLike
 from .utils import (_infer_level, _scale_nanos, check_key_existence,
-                    dolphindb_numeric_types, dolphindb_temporal_types,
-                    sql_select)
+                    dolphindb_temporal_types, sql_select)
 
 
 class Resampler(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
@@ -66,7 +64,7 @@ class Resampler(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
             on = self._index_columns[0]
             resample_column_name = self._index_name
         elif isinstance(level, (str, int)):
-            index_columns, _, index_names, __ = _infer_level(level, self._index_map)
+            index_columns, _, index_names, _ = _infer_level(level, self._index_map)
             on = index_columns[0]
             resample_column_name = index_names[0]
             if self._ddb_dtypes[on] not in dolphindb_temporal_types:

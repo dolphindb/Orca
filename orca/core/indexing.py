@@ -5,11 +5,12 @@ import dolphindb as ddb
 import numpy as np
 
 from .internal import _ConstantSP
-from .operator import ArithExpression, BooleanExpression, ContextByExpression
+from .operator import ArithExpression, BooleanExpression
+from .merge import _generate_joiner
 from .utils import (_get_where_list, _infer_dtype, check_key_existence,
-                             is_dolphindb_integral, is_dolphindb_scalar,
-                             is_dolphindb_vector, sql_select,
-                             to_dolphindb_literal, _try_convert_iterable_to_list)
+                    is_dolphindb_integral, is_dolphindb_scalar,
+                    is_dolphindb_vector, sql_select,
+                    to_dolphindb_literal, _try_convert_iterable_to_list)
 
 
 def _unfold(key):
@@ -79,7 +80,7 @@ class _LocIndexer(object):
                 if cols_sel.stop is None:
                     col_end = len(old_data_columns)
                 else:
-                    col_end = old_data_columns.index(cols_sel.stop)
+                    col_end = old_data_columns.index(cols_sel.stop) + 1
                 data_columns = old_data_columns[col_start:col_end]
         elif isinstance(cols_sel, str):
             data_columns, _ = check_key_existence(cols_sel, old_data_columns)
@@ -146,6 +147,8 @@ class _LocIndexer(object):
         data_columns = self._get_data_columns(cols_sel)
         if isinstance(rows_sel, slice) and rows_sel == slice(None):
             return df[data_columns]
+        elif isinstance(rows_sel, (list, tuple)) and len(rows_sel) == 0:
+            return df[data_columns].iloc[0:0]
 
         if isinstance(rows_sel, BooleanExpression):
             if rows_sel._var_name == df._var_name:
@@ -248,6 +251,7 @@ class _LocIndexer(object):
     def __setitem__(self, key, value):
         from .series import Series
         from .frame import DataFrame
+        from .groupby import ContextByExpression
 
         df = self._df
         session = df._session
@@ -279,12 +283,11 @@ class _LocIndexer(object):
         value_list = []
         if isinstance(value, Series):
             res = self[rows_sel, cols_sel]
-
             rows = session.run(f"{res._var_name}.{res._index_columns[0]}")
             lenrows = len(rows)
+            ref = value.compute(as_non_segmented=True)
+            df_var_name, ref_var_name = df._var_name, ref._var_name
             if (cols_sel is None) or isinstance(cols_sel, slice):
-                ref = value.compute(as_non_segmented=True)
-
                 find = session.run(
                     f"find({ref._var_name}.{ref._index_columns[0]}, {res._var_name}.{res._index_columns[0]})")
                 for i in range(0, lenrows):
@@ -293,23 +296,21 @@ class _LocIndexer(object):
                     else:
                         value_list.append(value[rows[i]])
             elif is_dolphindb_vector(cols_sel):
-                ref = value.compute(as_non_segmented=True)
-                _, from_clause = df._generate_joiner(df._var_name, ref._var_name, df._index_columns,
-                                                     ref._index_columns)
+                _, from_clause = _generate_joiner(df_var_name, ref_var_name, df._index_columns,
+                                                  ref._index_columns)
                 for i in range(0, lencols):
-                    value_list.append(f"tmp2.{ref._data_columns[0]}")
-
+                    value_list.append(f"{ref_var_name}.{ref._data_columns[0]}")
             elif isinstance(cols_sel, str):
-                ref = value.compute(as_non_segmented=True)
-                _, from_clause = df._generate_joiner(df._var_name, ref._var_name, df._index_columns,
-                                                     ref._index_columns)
-                value_list.append(f"tmp2.{ref._data_columns[0]}")
+                _, from_clause = _generate_joiner(df_var_name, ref_var_name, df._index_columns,
+                                                  ref._index_columns)
+                value_list.append(f"{ref_var_name}.{ref._data_columns[0]}")
         elif isinstance(value, DataFrame):
             ref = value.compute(as_non_segmented=True)
-            _, from_clause = df._generate_joiner(df._var_name, ref._var_name, df._index_columns,
-                                                 ref._index_columns)
+            df_var_name, ref_var_name = df._var_name, ref._var_name
+            _, from_clause = _generate_joiner(df_var_name, ref_var_name, df._index_columns,
+                                              ref._index_columns)
             for i in range(0, lencols):
-                value_list.append(f"tmp2.{cols_cond[i]}")
+                value_list.append(f"{ref_var_name}.{cols_cond[i]}")
         elif isinstance(value, ContextByExpression):
             if (value._var_name == df._var_name
                     and value._where_expr is df._where_expr):
@@ -326,17 +327,19 @@ class _LocIndexer(object):
             elif is_dolphindb_vector(cols_sel):
                 s = Series(value)
                 ref = s.compute(as_non_segmented=True)
-                _, from_clause = df._generate_joiner(df._var_name, ref._var_name, df._index_columns,
-                                                     ref._index_columns)
+                df_var_name, ref_var_name = df._var_name, ref._var_name
+                _, from_clause = _generate_joiner(df_var_name, ref_var_name, df._index_columns,
+                                                  ref._index_columns)
                 for i in range(0, lencols):
-                    value_list.append(f"tmp2.{ref._data_columns[0]}")
+                    value_list.append(f"{ref_var_name}.{ref._data_columns[0]}")
 
             elif isinstance(cols_sel, str):
                 s = Series(value)
                 ref = s.compute(as_non_segmented=True)
-                _, from_clause = df._generate_joiner(df._var_name, ref._var_name, df._index_columns,
-                                                     ref._index_columns)
-                value_list.append(f"tmp2.{ref._data_columns[0]}")
+                df_var_name, ref_var_name = df._var_name, ref._var_name
+                _, from_clause = _generate_joiner(df_var_name, ref_var_name, df._index_columns,
+                                                  ref._index_columns)
+                value_list.append(f"{ref_var_name}.{ref._data_columns[0]}")
         elif isinstance(value, set):
             if len(value) == lencols:
                 value_list = list(value)
@@ -390,7 +393,6 @@ class _LocIndexer(object):
             elif rows_sel.stop is None:
                 start_rows = session.run(f"find({var_name}.{index_column},{to_dolphindb_literal(rows_sel.start)})")
                 rows_cond = f"rowNo({var_name}.{index_column}) >= {start_rows}"
-                # rows_cond = f"rowNo(tmp1.{index_column}) >= {start_rows}"
             else:
                 start_rows = session.run(f"find({var_name}.{index_column},{to_dolphindb_literal(rows_sel.start)})")
                 stop_rows = session.run(f"find({var_name}.{index_column},{to_dolphindb_literal(rows_sel.stop)})")
@@ -447,6 +449,14 @@ class _iLocIndexer(object):
             raise KeyError(cols_sel)
         return data_columns
 
+    @staticmethod
+    def _check_negative_index(idx, length):
+        if idx < 0:
+            idx += length
+            if idx < 0:
+                raise IndexError("single positional indexer is out-of-bounds")
+        return idx
+
     def _get_rows_cond(self, rows_sel, ref):
         """
         Deduce rows selection condition from row index in the key.
@@ -481,9 +491,11 @@ class _iLocIndexer(object):
             start = min(start, stop)
             rows_cond = f"{start}:{stop}"    # TODO: start = stop = 0
         elif is_dolphindb_integral(rows_sel):
-            # rows_cond = f"{rows_sel}:{rows_sel + 1}"
+            rows_sel = self._check_negative_index(rows_sel, len(self._df))
             rows_cond = f"[{rows_sel}]"
         elif is_dolphindb_vector(rows_sel):
+            len_self = len(self._df)
+            rows_sel = [self._check_negative_index(idx, len_self) for idx in rows_sel]
             var = _ConstantSP.upload_obj(ref._session, rows_sel)
             if var.type not in (ddb.settings.DT_BYTE,
                                 ddb.settings.DT_SHORT,
@@ -506,9 +518,8 @@ class _iLocIndexer(object):
         session = df._session
         index_column = df._index._var_name
 
-        if is_dolphindb_scalar(rows_sel):
+        if is_dolphindb_integral(rows_sel):
             value = session.run(f"{df._var_name}[{rows_sel}]")
-
         elif isinstance(rows_sel, slice):
             if rows_sel.step is not None and rows_sel.step != 1:
                 raise KeyError("slice with step != 1 is not supported")
@@ -534,12 +545,10 @@ class _iLocIndexer(object):
             data_col = session.run(f"{df._var_name}[{rows_cond}]")
             index_col = session.run(f"{index_column}[{rows_cond}]")
             value = Series(data=list(data_col), index=list(index_col), session=session)
-
         elif is_dolphindb_vector(rows_sel):
             data_col = session.run(f"{df._var_name}[{rows_sel}]")
             index_col = session.run(f"{index_column}[{rows_sel}]")
             value = Series(data=list(data_col), index=list(index_col), session=session)
-
         else:
             raise NotImplementedError()
 
@@ -556,6 +565,8 @@ class _iLocIndexer(object):
         data_columns = self._get_data_columns(cols_sel)
         if isinstance(rows_sel, slice) and rows_sel == slice(None):
             return df[data_columns]
+        elif isinstance(rows_sel, (list, tuple)) and len(rows_sel) == 0:
+            return df[data_columns].iloc[0:0]
 
         if df._segmented:
             raise ValueError("A segmented table does not support direct access with iloc")
@@ -582,8 +593,6 @@ class _iLocIndexer(object):
         rows_sel, cols_sel = _unfold(key)
         data_columns = self._get_data_columns(cols_sel)
         data_columns = data_columns or df._data_columns
-        data_columns_literal = to_dolphindb_literal(data_columns)
-        # rows_cond, _ = self._get_rows_cond(rows_sel, df)
 
         session = df._session
 
@@ -595,10 +604,10 @@ class _iLocIndexer(object):
             res = self[rows_sel, cols_sel]
             rows = session.run(f"{res._var_name}.{res._index_columns[0]}")
 
-            # print(rows)
             lenrows = len(rows)
 
             ref = value.compute(as_non_segmented=True)
+            df_var_name, ref_var_name = df._var_name, ref._var_name
             if (cols_sel is None) or isinstance(cols_sel, slice):
                 find = session.run(
                     f"find({ref._var_name}.{ref._index_columns[0]}, {res._var_name}.{res._index_columns[0]})")
@@ -608,24 +617,23 @@ class _iLocIndexer(object):
                     else:
                         value_list.append(value.loc[rows[i]])
             elif is_dolphindb_vector(cols_sel):
-                _, from_clause = df._generate_joiner(df._var_name, ref._var_name, df._index_columns,
-                                                     ref._index_columns)
+                _, from_clause = _generate_joiner(df_var_name, ref_var_name, df._index_columns,
+                                                  ref._index_columns)
                 for i in range(0, lencols):
-                    value_list.append(f"tmp2.{ref._data_columns[0]}")
+                    value_list.append(f"{ref_var_name}.{ref._data_columns[0]}")
 
             elif is_dolphindb_scalar(cols_sel):
-                _, from_clause = df._generate_joiner(df._var_name, ref._var_name, df._index_columns,
-                                                     ref._index_columns)
-                value_list.append(f"tmp2.{ref._data_columns[0]}")
+                _, from_clause = _generate_joiner(df_var_name, ref_var_name, df._index_columns,
+                                                  ref._index_columns)
+                value_list.append(f"{ref_var_name}.{ref._data_columns[0]}")
 
         elif isinstance(value, DataFrame):
             ref = value.compute(as_non_segmented=True)
-            vlist = ref._data_columns
-
-            index_list, from_clause = df._generate_joiner(df._var_name, ref._var_name, df._index_columns,
-                                                          ref._index_columns)
+            df_var_name, ref_var_name = df._var_name, ref._var_name
+            _, from_clause = _generate_joiner(df_var_name, ref_var_name, df._index_columns,
+                                              ref._index_columns)
             for i in range(0, lencols):
-                value_list.append(f"tmp2.{data_columns[i]}")
+                value_list.append(f"{ref_var_name}.{data_columns[i]}")
 
 
         elif is_dolphindb_scalar(value):
@@ -697,7 +705,6 @@ class _iLocIndexer(object):
             elif rows_sel.stop is None:
                 start_rows = rows_sel.start
                 rows_cond = f"rowNo({var_name}.{index_column}) >= {start_rows}"
-                # rows_cond = f"rowNo(tmp1.{index_column}) >= {start_rows}"
 
             else:
                 start_rows = rows_sel.start

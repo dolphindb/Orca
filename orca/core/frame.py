@@ -9,23 +9,24 @@ import pandas as pd
 import pandas.plotting._core as gfx
 
 from .base import _Frame
-from .common import CopiedTableWarning, MixedTypeWarning, default_session
-from .indexes import DatetimeIndex, Index, MultiIndex, RangeIndex
+from .common import (MixedTypeWarning, _raise_must_compute_error,
+                     default_session)
+from .groupby import ContextByExpression
+from .indexes import Index, MultiIndex, RangeIndex
 from .indexing import _iLocIndexer, _LocIndexer
 from .internal import _ConstantSP, _InternalFrame
-from .operator import (ArithExpression, ArithOpsMixin, BooleanExpression,
-                       ContextByExpression, DataFrameLike, IOOpsMixin,
-                       LogicalOpsMixin, StatOpsMixin)
+from .merge import _generate_joiner, merge, merge_window
+from .operator import (
+    ArithExpression, BooleanExpression, DataFrameLike,
+    IOOpsMixin)
 from .series import Series
-from .utils import (ORCA_INDEX_NAME_FORMAT, _infer_axis, _infer_level,
-                    _merge_where_expr, _to_column_index, _to_index_map,
-                    _to_numpy_dtype, _try_convert_iterable_to_list,
-                    _unsupport_columns_axis, check_key_existence,
-                    dolphindb_literal_types, is_dolphindb_identifier,
-                    is_dolphindb_integral, is_dolphindb_scalar,
-                    is_dolphindb_vector, sql_select, to_dolphindb_literal,
-                    to_dolphindb_type_name)
-from .window import WindowJoiner
+from .utils import (
+    ORCA_COLUMN_NAME_FORMAT, ORCA_INDEX_NAME_FORMAT, _infer_axis, _infer_level,
+    _to_column_index, _to_index_map, _to_numpy_dtype,
+    _try_convert_iterable_to_list, _unsupport_columns_axis,
+    check_key_existence, dolphindb_numeric_types, get_orca_obj_from_script,
+    is_dolphindb_identifier, is_dolphindb_scalar, is_dolphindb_vector,
+    sql_select, to_dolphindb_literal, to_dolphindb_type_name)
 
 
 class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
@@ -67,7 +68,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
             else:
                 # TODO: there's a to_pandas operation and it's time consuming
                 # FIXME: uploading an orca Index and all-empty columns
-                pd_index = None if isinstance(index, Index) else index
+                pd_index = pd.RangeIndex(0, len(index)) if isinstance(index, Index) else index
                 pd_columns = columns.to_pandas() if isinstance(columns, Index) else columns
                 data = pd.DataFrame(data=data, index=pd_index,    # TODO: write your own Series parsing function
                                     columns=pd_columns, dtype=dtype, copy=False)    # TODO: copy = True or False ?
@@ -76,9 +77,10 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                     odf.attach_index(index)
             _Frame.__init__(self, odf, session)
         self._name = None
-        self._update_columns()        
+        self._update_metadata(index)        
 
-    def _update_columns(self):
+    def _update_metadata(self, index=None):
+        self._index = Index._from_internal(self._internal, index)
         if self._column_index_level > 1:
             columns = pd.MultiIndex.from_tuples(self._column_index)
         else:
@@ -90,7 +92,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
     def __getitem__(self, key):
         if key is None:
             return self
-        elif isinstance(key, slice):
+        elif isinstance(key, (int, slice)):
             return self.iloc[key]
         elif isinstance(key, BooleanExpression):
             return self._get_rows_from_boolean_expression(key)
@@ -157,7 +159,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         return iter(self.columns)
 
     def items(self):
-        return zip(self.columns, (self[col] for col in self.columns))
+        return zip(self.columns, (self[col] for col in self._data_columns))
 
     iteritems = items
 
@@ -312,7 +314,6 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         NotImplementedError
             To be implemented.
         """
-        _INDEX_NAME = "ORCA_DIFFERENT_INDICES_INDEX"
 
         def merge_columns(self_columns, other_columns):
             """
@@ -355,19 +356,20 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 or (not other._in_memory and len(other._index_columns) == 0)):
             raise ValueError("Frame has no default index if it is not in memory")
         session = self._session
+        self_var_name, other_var_name = self._var_name, other._var_name
         if other.is_dataframe_like:
             self_data_columns = self._data_columns
             other_data_columns = other._data_columns
-            index_list, from_clause = self._generate_joiner(
-                self._var_name, other._var_name, self._index_columns, other._index_columns)
+            index_list, from_clause = _generate_joiner(
+                self_var_name, other_var_name, self._index_columns, other._index_columns)
             if self_data_columns == other_data_columns:
-                select_list = (f"{func}(tmp1.{c}, tmp2.{c}) as {c}"
+                select_list = (f"{func}({self_var_name}.{c}, {other_var_name}.{c}) as {c}"
                                for c in self_data_columns)
                 data_columns = self_data_columns
             else:
                 merged_columns = list(merge_columns(self_data_columns, other_data_columns))
                 select_list = (f"00f as {s if o is None else o}" if s is None or o is None
-                               else f"{func}(tmp1.{s}, tmp2.{s}) as {s}"
+                               else f"{func}({self_var_name}.{s}, {other_var_name}.{s}) as {s}"
                                for s, o in merged_columns)
                 data_columns = [s if o is None else o for s, o in merged_columns]
             select_list = itertools.chain(index_list, select_list)
@@ -376,9 +378,9 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         elif other.is_series_like:
             self_data_columns = self._data_columns
             other_data_column = other._data_columns[0]
-            index_list, from_clause = self._generate_joiner(
+            index_list, from_clause = _generate_joiner(
                 self._var_name, other._var_name, self._index_columns, other._index_columns)
-            select_list = (f"{func}(tmp1.{c}, tmp2.{other_data_column}) as {c}"
+            select_list = (f"{func}({self_var_name}.{c}, {other_var_name}.{other_data_column}) as {c}"
                            for c in self_data_columns)
             data_columns = self_data_columns
             select_list = itertools.chain(index_list, select_list)
@@ -409,132 +411,24 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
 
     # Combining / joining / merging
 
-    @staticmethod
-    def _get_left_right_data_join_columns(left, right, on, left_on, right_on, left_index, right_index):
-        """
-        Return (left_data_columns, left_join_columns, right_data_columns, right_join_columns)
-        """
-        left_data_columns = left._data_columns
-        right_data_columns = right._data_columns
-        if on is not None:
-            if left_on is not None or right_on is not None:
-                # TODO: pandas.errors.MergeError
-                raise ValueError('Can only pass argument "on" OR "left_on" and "right_on", not a combination of both.')
-            left_join_columns = right_join_columns = _try_convert_iterable_to_list(on)
-            _, left_data_columns = check_key_existence(left_join_columns, left_data_columns)
-            _, right_data_columns = check_key_existence(right_join_columns, right_data_columns)
-        else:    # on is None, left_on is None and right_on is None
-            if left_index:
-                left_join_columns = left._index_columns
-            else:
-                left_join_columns, left_data_columns = check_key_existence(left_on, left_data_columns)
-            if right_index:
-                right_join_columns = right._index_columns
-            else:
-                right_join_columns, right_data_columns = check_key_existence(right_on, right_data_columns)
-        if len(left_join_columns) != len(right_join_columns):
-            raise ValueError("len(right_on) must equal len(left_on)")
-        return left_data_columns, left_join_columns, right_data_columns, right_join_columns
-
     def join(self, other, on=None, how="left", lsuffix="", rsuffix="", sort=False):
-        return self.merge(other, how, left_on=on, left_index=(not on),
-                          right_index=True, suffixes=(lsuffix, rsuffix),
-                          sort=sort)
+        return merge(self, other, how=how, left_on=on, left_index=(not on),
+                     right_index=True, suffixes=(lsuffix, rsuffix), sort=sort)
 
     def merge(self, right, how='inner', on=None, left_on=None, right_on=None,
               left_index=False, right_index=False, sort=False, suffixes=('_x', '_y'),
-              copy=True, indicator=False, validate=None):
-        # TODO: return internal expression
-        if sort:    # TDOO: sort
-            raise NotImplementedError()
-        if not isinstance(right, (DataFrame, Series)):
-            raise TypeError('other must be a DataFrame or a Series')
-        if isinstance(right, Series) and right.name is None:
-            raise TypeError('Other Series must have a name')
-        lsuf, rsuf = suffixes
-        if not isinstance(lsuf, str) or not isinstance(rsuf, str):
-            raise TypeError("Both lsuffix and rsuffix must be strings")
-        left_ref = self.compute()
-        right_ref = right.compute()
-        left_data_columns, left_join_columns, right_data_columns, right_join_columns = \
-            self._get_left_right_data_join_columns(
-                left_ref, right_ref, on, left_on, right_on, left_index, right_index)
-
-        index_list, from_clause = self._generate_joiner(
-            left_ref._var_name, right_ref._var_name,
-            left_join_columns, right_join_columns, how=how, sort=sort)
-        overlap_columns = set(left_data_columns) & set(right_data_columns)
-        if overlap_columns and not lsuf and not rsuf:
-            raise ValueError(f"columns overlap but no suffix specified: "
-                             f"{list(overlap_columns)}")
-
-        def get_join_list(tb_name, suf, data_columns, join_columns=None):
-            def overlap_checked_col(col):
-                return f"{tb_name}.{col} as " + (col + suf if col in overlap_columns else col)
-            if join_columns is None:
-                return (overlap_checked_col(col) for col in data_columns)
-            else:
-                join_list = []
-                for col in data_columns:
-                    try:
-                        idx = join_columns.index(col)
-                        column_alias_script = index_list[idx]
-                        column_alias_script = column_alias_script[:column_alias_script.index(" as ")+4] + col
-                        join_list.append(column_alias_script)
-                    except ValueError:
-                        join_list.append(overlap_checked_col(col))
-                return join_list
-
-        index_list = list(index_list)
-        if left_index and not right_index:
-            select_list = itertools.chain(
-                index_list,
-                get_join_list("tmp1", lsuf, left_data_columns),
-                get_join_list("tmp2", rsuf, right_ref._data_columns, right_join_columns)
-            )
-        elif right_index and not left_index:
-            select_list = itertools.chain(
-                (f"tmp1.{col} as {col}" for col in left_ref._index_columns),
-                get_join_list("tmp1", lsuf, left_ref._data_columns, left_join_columns),
-                get_join_list("tmp2", rsuf, right_data_columns)
-            )
-        elif not left_index and not right_index:
-            select_list = itertools.chain(
-                get_join_list("tmp1", lsuf, left_ref._data_columns),
-                get_join_list("tmp2", rsuf, right_data_columns)
-            )
-        else:
-            select_list = itertools.chain(
-                index_list,
-                get_join_list("tmp1", lsuf, left_data_columns),
-                get_join_list("tmp2", rsuf, right_data_columns)
-            )
-
-        script = sql_select(select_list, from_clause)
-        if not left_index and not right_index:
-            index_map = None
-        else:
-            index_map = left_ref._index_map
-        return DataFrame._get_from_script(self._session, script, index_map=index_map)
+              copy=True, indicator=False, validate=None,
+              by=None, left_by=None, right_by=None):
+        return merge(self, right, how=how, on=on, left_on=left_on, right_on=right_on,
+                     left_index=left_index, right_index=right_index, sort=sort,
+                     suffixes=suffixes, copy=copy, indicator=indicator, validate=validate,
+                     by=by, left_by=left_by, right_by=right_by)
 
     def merge_window(self, right, window_lower, window_upper, prevailing=False, on=None,
                      left_on=None, right_on=None, left_index=False, right_index=False):
-        if not isinstance(right, (DataFrame, Series)):
-            raise TypeError('other must be a DataFrame or a Series')
-        if isinstance(right, Series) and right.name is None:
-            raise TypeError('Other Series must have a name')
-        if not is_dolphindb_integral(window_lower) or not is_dolphindb_integral(window_upper):
-            raise TypeError("Both window_lower and window_upper must be integers")
-        left_ref = self.compute()
-        right_ref = right.compute()
-        _, left_join_columns, __, right_join_columns = \
-            self._get_left_right_data_join_columns(
-                left_ref, right_ref, on, left_on, right_on, left_index, right_index)
-
-        window = f"{window_lower}:{window_upper}"
-        method = "pwj" if prevailing else "wj"
-        return WindowJoiner(self._session, method, window, left_ref._internal,
-                            right_ref._internal, left_join_columns, right_join_columns)
+        return merge_window(self, right, window_lower=window_lower, window_upper=window_upper,
+                            prevailing=prevailing, on=on, left_on=left_on, right_on=right_on,
+                            left_index=left_index, right_index=right_index)
 
     # Methods that are trying to modify the data
     def append(self, other, ignore_index=False, verify_integrity=False, sort=None, inplace=False):
@@ -549,8 +443,6 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                     return
             else:
                 if not inplace:
-                    warnings.warn("A table is copied as an in-memory table.",
-                                  CopiedTableWarning)
                     new_df = self._copy_as_in_memory_frame(ignore_index=ignore_index)
                     new_df._internal.append(other, ignore_index, sort)
                     return new_df
@@ -571,15 +463,15 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         def update_different_frame(var, value, key):
             ref = value.compute()
             column_names = ref._data_columns
+            ref_var_name = ref._var_name
             if self._index_columns == [] and ref._index_columns == []:
-                ref_name = ref._var_name
-                new_values = [f"{ref_name}.{column_name}" for column_name in column_names]
+                new_values = [f"{ref_var_name}.{column_name}" for column_name in column_names]
                 var._sql_update(key, new_values)
             else:
-                _, from_table_joiner = self._generate_joiner(
+                _, from_table_joiner = _generate_joiner(
                     self._var_name, ref._var_name,
                     self._index_columns, ref._index_columns, how="left_semi")
-                new_values = [f"tmp2.{column_name}" for column_name in column_names]
+                new_values = [f"{ref_var_name}.{column_name}" for column_name in column_names]
                 var._sql_update(key, new_values, from_table_joiner)
 
         var = self._var
@@ -604,12 +496,12 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 odf = value._internal.copy_as_in_memory_table()
                 odf.rename(columns={data_column: key[0]}, level=None)
                 self._internal = odf
+                self._update_metadata()
                 return
             if value._var_name == self._var_name:
                 if value._where_expr is not self._where_expr:
-                    raise ValueError("Setting a value to a DataFrame with a WHERE clause "
-                                     "is not supported, use .compute() to explicitly convert "
-                                     "the Expression to a DataFrame or Series")
+                    _raise_must_compute_error("Setting a value to a DataFrame "
+                                              "with a WHERE clause is not supported")
                     # update t set key = NULL
                     # type_name = to_dolphindb_type_name(value._ddb_dtype)
                     # null_values = [f"{type_name}(NULL)"]
@@ -657,7 +549,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         if has_new_key:
             new_odf = _InternalFrame(session, self._var, index_map=self._index_map, data_columns=new_data_columns)
             self._internal = new_odf
-        self._update_columns()
+        self._update_metadata()
 
     # Reindexing / selection / label manipulation
 
@@ -720,7 +612,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 return self._with_where_expr(self._where_expr, odf, session=self._session)
             else:
                 self._internal.rename(columns=columns, level=level)
-                self._update_columns()
+                self._update_metadata()
 
     def reindex(self, labels=None, index=None, columns=None, axis=None, method=None, copy=True, level=None, fill_value=None, limit=None, tolerance=None):
         if axis is not None and (index is not None or columns is not None):
@@ -781,65 +673,30 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         internal = _InternalFrame(self._session, self._var, data_columns=columns, column_index=idx)
         return DataFrame(internal, session=self._session)
 
-    def reset_index(self, level=None, drop=False, inplace=False, col_level=0, col_fill=''):
-        index_columns, _, __, ___ = _infer_level(level, self._index_map)
-        index_column_size = len(self._index_columns)
-        column_index_level = self._column_index_level
-        if col_level >= column_index_level:
-            raise IndexError(f"Too many levels: Index has only {column_index_level}, not {col_level+1}")
-        index_map = []
-        column_index = []
-        data_columns = []
-        for level_idx, col, idx_map in zip(range(index_column_size), self._index_columns, self._index_map):
-            if col not in index_columns:
-                index_map.append(idx_map)
-            elif not drop:
-                if index_column_size == 1:
-                    index_name = "index" if idx_map[1] is None else idx_map[1][0]
-                else:
-                    index_name = f"level_{level_idx}" if idx_map[1] is None else idx_map[1][0]
-                new_column_index = [col_fill] * column_index_level
-                new_column_index[col_level] = index_name
-                column_index.append(tuple(new_column_index))
-                data_columns.append(col)
-        column_index += self._column_index
-        data_columns += self._data_columns
-        new_odf = _InternalFrame(self._session, self._var, index_map=index_map,
-                                 data_columns=data_columns, column_index=column_index)
-
-        if inplace:
-            self._internal = new_odf
-            self._index = Index._from_internal(new_odf)
-            return
-
-        return DataFrame._with_where_expr(self._where_expr, new_odf)
-
     def set_index(self, keys,
                   drop: bool = True,
                   append: bool = False,
                   inplace: bool = False,    # TODO: copy ddb df
                   verify_integrity: bool = False):
-        data_columns = self._data_columns
-        keys, dropped = check_key_existence(keys, data_columns)
-        if drop:
-            data_columns = dropped
-        index_map = [(key, (key,)) for key in keys]
-        new_odf = _InternalFrame(self._session, self._var, index_map=index_map, data_columns=data_columns)    # TODO: dealing with multiple level columns
+        if not inplace:
+            new_df = self._copy_as_in_memory_frame()
+            new_df.set_index(keys=keys, drop=drop, append=append,
+                             inplace=True, verify_integrity=verify_integrity)
+            return new_df
+        else:
+            data_columns = self._data_columns
+            keys, dropped = check_key_existence(keys, data_columns)
+            if drop:
+                data_columns = dropped
+            index_map = [(key, (key,)) for key in keys]
 
-        if inplace:
+            new_odf = _InternalFrame(self._session, self._var, index_map=index_map, data_columns=data_columns)    # TODO: dealing with multiple level columns
             self._internal = new_odf
             self._index = Index._from_internal(new_odf)
+            self._update_metadata()
             return
 
-        return DataFrame._with_where_expr(self._where_expr, new_odf)
-
     def droplevel(self, level, axis=0):
-        def find_level_index_by_str(level, index_map):
-            for i, m in enumerate(index_map):
-                if m is not None and m[0] == level:
-                    return i
-            return -1
-
         session = self._session
         if is_dolphindb_scalar(level):
             level = (level,)
@@ -848,29 +705,85 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
 
         _unsupport_columns_axis(self, axis)
 
-        index_map = self._index_map
-        len_index = len(index_map)
-        levels = set()
-        for l in level:
-            if isinstance(l, str):
-                level_index = find_level_index_by_str(l, index_map)
-                if level_index == -1:
-                    raise KeyError(f"Level {l} not found")
-            elif is_dolphindb_integral(l) and l < len_index:
-                level_index = l
-            else:
-                raise KeyError(f"Level {l} not found")
-            levels.add(level_index)
-        new_index_map = [m for i, m in enumerate(index_map) if i not in levels]
-        new_odf = _InternalFrame(session, self._var, new_index_map, self._data_columns,
-                                    self._column_index, self._column_index_names)
+        _, _, _, level_idx = _infer_level(level, self._index_map)
+        index_map = [m for i, m in enumerate(self._index_map) if i not in level_idx]
+        new_odf = _InternalFrame(session, self._var, index_map, self._data_columns,
+                                 self._column_index, self._column_index_names)
         return DataFrame._with_where_expr(self._where_expr, new_odf)
 
-    # def pivot_table(self, values=None, index=None, columns=None, aggfunc='mean', fill_value=None, margins=False, dropna=True, margins_name='All', observed=False):
-    #     if values is not None:
-    #         values, _ = check_key_existence(values, self._data_columns)
+    def stack(self, level=-1, dropna=True):
+        if self._column_index_level != 1:
+            raise ValueError("column level must be 1")
+        if len(self._index_columns) > 0:
+            key_col_names = to_dolphindb_literal(self._index_columns)
+        else:
+            key_col_names = ""
+        value_col_names = to_dolphindb_literal(self._data_columns)
+        if self._column_index_names is None or self._column_index_names[0] is None:
+            new_index = ORCA_INDEX_NAME_FORMAT(len(self._index_columns))
+        else:
+            new_index = self._column_index_names[0]
+        new_names = to_dolphindb_literal([new_index, ORCA_COLUMN_NAME_FORMAT(0)])
+        script = f"unpivot({self._var_name},{key_col_names},{value_col_names})" \
+                 f".rename!(`valueType`value, {new_names})"
+        index_map = self._index_map + [(new_index, None)]
+        res = get_orca_obj_from_script(self._session, script, index_map, squeeze=True, squeeze_axis=1)
+        if dropna:
+            return res.dropna(how='all')
+        else:
+            return res
+
+    def pivot_table(self, values=None, index=None, columns=None, aggfunc='mean', fill_value=None, margins=False, dropna=True, margins_name='All', observed=False):
+        if index is None:
+            raise ValueError("index cannot be empty in Orca's pivot_table")
+        if columns is None:
+            raise ValueError("columns cannot be empty in Orca's pivot_table")
+        if not isinstance(aggfunc, str):
+            raise TypeError("aggfunc must be a string in Orca's pivot_table")
+
+        def get_column_key_and_script(column):
+            ext_err = "Unable to pivot with an external Series"
+            if isinstance(column, str):
+                check_key_existence(column, self._data_columns)
+                key = script = column
+            elif isinstance(column, Series):
+                if column._var_name != self._var_name:
+                    raise ValueError(ext_err)
+                key = script = column._data_columns[0]
+            elif isinstance(column, Index):
+                if column._var_name != self._var_name:
+                    raise ValueError(ext_err)
+                if isinstance(column, MultiIndex):
+                    raise ValueError("Unable to pivot with MultiIndex")
+                key = script = column._index_columns[0]
+            elif isinstance(column, (ArithExpression, BooleanExpression)):
+                if not column.is_series_like:
+                    raise ValueError("Grouper is not 1-dimensional")
+                if column._var_name != self._var_name:
+                    raise ValueError(ext_err)
+                key = column._data_columns[0]
+                script = column._get_data_select_list()[0]
+            else:
+                raise KeyError(column)
+            return key, script
         
-    
+        if values is not None:
+            if not isinstance(values, str):
+                raise TypeError("values must be a string")
+            check_key_existence(values, self._data_columns)
+            select_list = [f"{aggfunc}({values})"]
+        else:    # DolphinDB extension
+            select_list = [aggfunc]
+        index_key, index_script = get_column_key_and_script(index)
+        columns_key, columns_script = get_column_key_and_script(columns)
+        pivot_list = [f"{index_script} as {index_key}",
+                      f"{columns_script} as {columns_key}"]
+
+        script = sql_select(select_list, self._var_name, self._where_expr,
+                            pivot_list=pivot_list)
+        return get_orca_obj_from_script(self._session, script, [index_key], column_index_names=[columns_key])
+
+
     # def pivot(self, index=None, columns=None, values=None):
     #     script = sql_select()
 
@@ -878,8 +791,8 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         # TODO: support MultiIndex
         if not copy:
             raise ValueError("copy must be True for an Orca DataFrame to be transposed")
-        if self._is_mixed_type():
-            raise ValueError("A DataFrame with mixed-type columns cannot be transposed")
+        if not self._is_matrix_like():
+            raise ValueError("A DataFrame with mixed-type or string-type columns cannot be transposed")
         if self._column_index_level > 1 or len(self._index_columns) > 1:
             raise ValueError("Only DataFrames with a one-level column and index can be transposed")
 
@@ -907,6 +820,51 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
     @property
     def T(self):
         return self.transpose()
+
+    def dot(self, other):
+        if isinstance(other, (ArithExpression, BooleanExpression)):
+            _raise_must_compute_error("Unable to call 'dot' on an Expression")
+        if not self._is_matrix_like() or not other._is_matrix_like():
+            raise ValueError("Unable to call 'dot' on a DataFrame with mixed-type columns")
+        if len(self.columns) != len(other):
+            raise ValueError("matrices are not aligned")
+
+        session = self._session
+        ref = self.compute()
+        self_script = ref._to_script(ignore_index=True)
+        other_script = other._to_script(ignore_index=True)
+        script = f"dot(matrix({self_script}),matrix({other_script})).table()"
+        var = _ConstantSP.run_script(session, script)
+        data_columns = [f"C{i}" for i in range(len(other.columns))]
+        column_index = other._column_index
+        odf = _InternalFrame(session, var, data_columns=data_columns, column_index=column_index)
+        odf.attach_index(ref.index)
+        return DataFrame(odf, session=session)
+
+    def diag(self, ignore_index=False):
+        if isinstance(self, (ArithExpression, BooleanExpression)):
+            _raise_must_compute_error("Unable to call 'diag' on an Expression")
+        if not self._is_matrix_like():
+            raise ValueError("Unable to call 'diag' on a DataFrame with mixed-type columns")
+        ref = self.compute()
+        size = len(ref)
+        if size != len(ref.columns):
+            raise ValueError("The DataFrame is not a square matrix")
+        
+        self_script = ref._to_script(ignore_index=True)
+        script = f"diag(matrix({self_script}))"
+        if ignore_index:
+            script = f"table({script} as {ORCA_COLUMN_NAME_FORMAT(0)})"
+            index_map = None
+        else:
+            index_list = (f"{script} as {col}"
+                          for (col, _), script
+                          in zip(ref._index_map, ref.index._to_script_list()))
+            table_columns = itertools.chain([f"{script} as {ORCA_COLUMN_NAME_FORMAT(0)}"], index_list)
+            script = ",".join(table_columns)
+            script = f"table({script})"
+            index_map = ref._index_map
+        return Series._get_from_script(self._session, script, index_map=index_map)
 
     def xs(self, key, axis=0, level=None, drop_level=True):
         if is_dolphindb_scalar(key):
@@ -970,6 +928,10 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
     # TODO: @property and @lazyproperty
     def _is_mixed_type(self):
         return len(set(self._ddb_dtypes[self._data_columns])) > 1
+
+    def _is_matrix_like(self):
+        return not self._is_mixed_type() \
+            and self._ddb_dtypes[self._data_columns[0]] in dolphindb_numeric_types
 
     @classmethod
     def from_dict(cls, *args, **kwargs):

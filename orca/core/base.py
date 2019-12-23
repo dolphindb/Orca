@@ -1,22 +1,21 @@
 import abc
 import itertools
 import warnings
-from typing import Iterable
 
-import dolphindb as ddb
 import numpy as np
 import pandas as pd
 import pandas.plotting._core as gfx
 
 from .accessor import CachedAccessor
-from .common import CopiedTableWarning
+from .common import CopiedTableWarning, _get_verbose
 from .internal import _ConstantSP, _InternalAccessor, _InternalFrame
-from .operator import (ArithOpsMixin, BooleanExpression,
-                                LogicalOpsMixin, StatOpsMixin)
-from .utils import (_merge_where_expr, check_key_existence, _to_data_column,
-                             get_orca_obj_from_script, is_dolphindb_integral,
-                             is_dolphindb_scalar, is_dolphindb_vector,
-                             sql_select, to_dolphindb_literal,sql_update)
+from .operator import (ArithExpression, ArithOpsMixin, BooleanExpression,
+                       LogicalOpsMixin, StatOpsMixin)
+from .utils import (_infer_axis, _infer_level, _merge_where_expr, _to_data_column,
+                    check_key_existence, get_orca_obj_from_script,
+                    is_dolphindb_integral, sql_select, sql_update,
+                    to_dolphindb_literal, is_dolphindb_scalar,
+                    _try_convert_iterable_to_list, _unsupport_columns_axis)
 
 
 class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, metaclass=abc.ABCMeta):
@@ -26,14 +25,14 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
     """
 
     # def __init__(self, session, internal, index):
-    def __init__(self, internal, session, index=None, copy=False):
+    def __init__(self, internal, session, copy=False):
         from .indexes import Index
         self._internal = internal
         self._session = session
         self._where_expr = None
         self._is_snapshot = False
         self._name = None
-        self._index = Index._from_internal(internal, index)
+        self._index = None
 
     @classmethod
     def _with_where_expr(cls, where_expr, odf, *args, **kwargs):
@@ -48,7 +47,10 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
     def _get_rows_from_boolean_expression(self, key):
         assert isinstance(key, (BooleanExpression, tuple))
         where_expr = _merge_where_expr(self._where_expr, key)
-        return self._with_where_expr(where_expr, self._internal)
+        df = self._with_where_expr(where_expr, self._internal)
+        if df.is_series_like:
+            df._name = self._name
+        return df
 
     def _get_rows_from_boolean_series(self, key):
         # TODO: align index
@@ -154,7 +156,20 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
             return len(self._internal)
         else:
             script = sql_select(["count(*)"], self._var_name, self._where_expr, is_exec=True)
+            if _get_verbose():
+                print(script)
             return self._session.run(script)
+
+    @property
+    def empty(self):
+        if len(self) > 0:
+            return False
+        else:
+            return True
+
+    @property
+    def is_copy(self):
+        return None
     
     def to_pandas(self):    # TODO: optimize
         data = self._session.run(self._to_script())
@@ -235,9 +250,10 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
             column_index = None
         index_map = [] if ignore_index else None
         name = self._name if self.is_series_like else None
-        return self._get_from_script(session, script, self, index_map=index_map,
-                                     data_columns=data_columns, column_index=column_index,
-                                     name=name, squeeze=squeeze, squeeze_axis=squeeze_axis)
+        return self._get_from_script(
+            session, script, self, index_map=index_map,
+            data_columns=data_columns, column_index=column_index,
+            name=name, squeeze=squeeze, squeeze_axis=squeeze_axis)
 
     def _prepare_for_update(self):
         if not self._in_memory:
@@ -266,21 +282,28 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         else:
             return self.iloc[-n:]
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def iloc(self):
         pass
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def is_dataframe_like(self):
         pass
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def is_series_like(self):
         pass
 
     @property
     def array(self):
         return self.to_numpy().tolist()
+
+    def __array__(self, dtype=None):
+        # this function is to support some library like numpy to init data
+        return np.asarray(self.array, dtype)
 
     @property
     def index(self):
@@ -312,51 +335,8 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
     def _logical_unary_op(self, *args, **kwargs):
         return LogicalOpsMixin._logical_unary_op(self, *args, **kwargs)
 
-
-    @staticmethod
-    def _generate_joiner(left_var_name, right_var_name,
-                         left_join_columns, right_join_columns, 
-                         how="outer", sort=False, use_right_index=False):
-        """
-        Returns the index_list and from_clause used in binary operations on
-        Frames with different indices.
-        """
-        if len(left_join_columns) != len(right_join_columns):
-            raise ValueError("cannot join with no overlapping index names")
-        if sort:
-            methods = {"left_semi": "slsj", "left": "slj", "right": "slj",
-                       "outer": "sfj", "inner": "sej"}
-        else:
-            methods = {"left_semi": "lsj", "left": "lj", "right": "lj",
-                       "outer": "fj", "inner": "ej", "asof": "aj"}
-        method = methods.get(how, None)
-        if method is None:
-            raise ValueError(f"do not recognize join method {how}")
-
-        left_join_literal = to_dolphindb_literal(left_join_columns)
-        right_join_literal = to_dolphindb_literal(right_join_columns)
-        if how == "right":
-            index_list = (f"tmp2.{col} as {col}" for col in right_join_columns)
-        elif how in ("left", "left_semi"):
-            index_list = (f"tmp1.{col} as {col}" for col in left_join_columns)
-        else:
-            index_list = (
-                f"iif(isValid(tmp1.{left_col}), "
-                f"tmp1.{left_col}, "
-                f"tmp2.{right_col}) "
-                f"as {right_col if use_right_index else left_col}"
-                for left_col, right_col
-                in zip(left_join_columns, right_join_columns)
-            )
-        if how == "right":
-            from_clause = f"{method}({right_var_name} as tmp2, " \
-                          f"{left_var_name} as tmp1, " \
-                          f"{right_join_literal}, {left_join_literal})"
-        else:
-            from_clause = f"{method}({left_var_name} as tmp1, " \
-                          f"{right_var_name} as tmp2, " \
-                          f"{left_join_literal}, {right_join_literal})"
-        return index_list, from_clause
+    def _update_metadata(self):
+        pass
 
     def _concat_script(self, merged_columns, ignore_index, inner_join=False):
         def find_column_name(col_idx):
@@ -380,60 +360,79 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         if not self._in_memory:
             script = f"loadTableBySQL(<{script}>)"
         return f"({script})"
-
-    # def _get_script_with_binary_op_on_table_like_and_constant(self, other_name, func, reversed):
-    #     select_list = ((f"{func}({col},{other_name}) as {col}"
-    #                     if not reversed
-    #                     else f"{func}({other_name},{col}) as {col}")
-    #                    for col in self._column_names)
-    #     from_clause = self._var_name
-    #     return sql_select(select_list, from_clause, is_exec=True)
-
-    # def _get_script_with_binary_op_on_dataframe_and_constant(self, other, func, reversed=False):
-    #     assert self.is_dataframe_like
-    #     assert isinstance(other, _ConstantSP)
-    #     other_name, other_form = other._var_name, other.form
-    #     if other_form == ddb.settings.DF_SCALAR:
-    #         return self._get_script_with_binary_op_on_table_like_and_constant(other_name, func, reversed)
-    #     elif other_form == ddb.settings.DF_VECTOR:
-    #         raise NotImplementedError()
-    #     else:
-    #         raise TypeError("Parameter must be a DolphinDB scalar or vector")
-
-    # def _get_script_with_binary_op_on_series_and_constant(self, other, func, reversed=False):
-    #     assert self.is_series_like
-    #     assert isinstance(other, _ConstantSP)
-    #     self_name, other_name = self._var_name, other._var_name
-    #     if self.is_table_like:
-    #         return self._get_script_with_binary_op_on_table_like_and_constant(other_name, func, reversed)
-    #     elif not reversed:
-    #         return f"{func}({self_name},{other_name})"
-    #     else:
-    #         return f"{func}({other_name},{self_name})"
-
-    # def _get_script_with_binary_op_on_series_and_series(self, other, func):
-    #     assert self.is_series_like
-    #     assert other.is_series_like
-    #     raise NotImplementedError()
-
-    # def _get_script_with_binary_op_on_dataframe_and_series(self, other, func):
-    #     if self.is_dataframe_like and other.is_series_like:
-    #         raise NotImplementedError()
-    #     elif self.is_series_like and other.is_dataframe_like:
-    #         raise NotImplementedError()
-
-    # def _get_script_with_binary_op_on_dataframe_and_dataframe(self, other, func):
-    #     assert self.is_dataframe_like
-    #     assert other.is_dataframe_like
-    #     raise NotImplementedError()
-
-    # def _get_series_script_within_sql(self):
-    #     odf = self._internal
-    #     var_name, column_name = self._var_name, odf.column_names[0]
-    #     return f"{var_name}.{column_name}"
     
     def _get_data_select_list(self):
         return self._internal.data_select_list
+
+    def reset_index(self, level=None, drop=False, inplace=False, col_level=0, col_fill=''):
+        from orca.core.frame import DataFrame
+        from orca.core.indexes import Index
+
+        index_columns, _, _, _ = _infer_level(level, self._index_map)
+        index_column_size = len(self._index_columns)
+        column_index_level = self._column_index_level
+        if col_level >= column_index_level:
+            raise IndexError(f"Too many levels: Index has only {column_index_level}, not {col_level+1}")
+        index_map = []
+        column_index = []
+        data_columns = []
+        for level_idx, col, idx_map in zip(range(index_column_size), self._index_columns, self._index_map):
+            if col not in index_columns:
+                index_map.append(idx_map)
+            elif not drop:
+                if index_column_size == 1:
+                    index_name = "index" if idx_map[1] is None else idx_map[1][0]
+                else:
+                    index_name = f"level_{level_idx}" if idx_map[1] is None else idx_map[1][0]
+                new_column_index = [col_fill] * column_index_level
+                new_column_index[col_level] = index_name
+                column_index.append(tuple(new_column_index))
+                data_columns.append(col)
+        column_index += self._column_index
+        data_columns += self._data_columns
+        new_odf = _InternalFrame(self._session, self._var, index_map=index_map,
+                                 data_columns=data_columns, column_index=column_index)
+
+        if inplace:
+            if self.is_series_like:
+                raise TypeError("Cannot reset_index inplace on a Series to create a DataFrame")
+            self._internal = new_odf
+            self._index = Index._from_internal(new_odf)
+            self._update_metadata()
+            return
+
+        return DataFrame._with_where_expr(self._where_expr, new_odf)
+
+    def unstack(self, level=-1, fill_value=None):
+        if self.is_dataframe_like:
+            raise NotImplementedError()
+        if len(self._index_columns) != 2:
+            raise ValueError("Index levels must be exactly 2 due to the limitations of DolphinDB. Use droplevel to drop unneeded levels")
+        index_columns, _, _, level_idx = _infer_level(level, self._index_map)
+        assert len(level_idx) == 1
+        level_idx = level_idx[0]
+        if len(index_columns) != 1:
+            raise ValueError("Only one level is supported in unstack")
+        pivot_column = index_columns[0]
+        select_list = [self._data_columns[0]]
+        pivot_index = None
+        other_index = []
+        pivot_index_level = 0
+        for i, idx in enumerate(self._index_columns):
+            if i != level_idx:
+                if pivot_index is None:
+                    pivot_index = idx
+                    pivot_index_level = i
+                else:
+                    other_index.append(idx)
+        assert len(other_index) == 0
+
+        pivot_list = [pivot_index, pivot_column]
+        script = sql_select(select_list, self._var_name, self._where_expr,
+                            pivot_list=pivot_list)
+        index_map = [self._index_map[pivot_index_level]]
+        column_index_names = [self._index_names[level_idx]]
+        return get_orca_obj_from_script(self._session, script, index_map, column_index_names=column_index_names)
 
     if pd.__version__.startswith("0.24"):
         pd_plot = gfx.FramePlotMethods
@@ -451,67 +450,78 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
     def boxplot(self, *args, **kwargs):
         return self.to_pandas().boxplot(*args, **kwargs)
 
-    @property
-    def empty(self):
-        if self.size > 0:
-            return False
-        else:
-            return True
+    def _pandas_where(self, cond, other=np.nan, inplace=False, axis=None, level=None, errors="raise", try_cast=False):
+        if isinstance(cond,_Frame) or isinstance(cond,BooleanExpression) or isinstance(cond,ArithExpression):
+            cond = cond.to_pandas()
+        if isinstance(other,_Frame) or isinstance(other, BooleanExpression) or isinstance(other,ArithExpression):
+            other = other.to_pandas()
 
-    @property
-    def is_copy(self):
-        return None
+        if inplace:
+            self = self.__class__(self.to_pandas().where(
+                cond, other, inplace, axis, level, errors=errors, try_cast=try_cast))
+            return self
+        else:
+            return self.__class__(self.to_pandas().where(
+                cond, other, inplace, axis, level, errors=errors, try_cast=try_cast))
 
     def where(self, cond, other=np.nan, inplace=False, axis=None, level=None, errors="raise", try_cast=False):
-        # TODO: support inplace
-
+        from .frame import DataFrame
+        from .series import Series
         if callable(cond) or callable(other) or axis !=None or level !=None:
-            return self.to_pandas().where(
-                cond, other, inplace, axis, level, errors=errors, try_cast=try_cast)
-            # TODO: if inplace, how to change data
+            return self._pandas_where(cond, other, inplace, axis, level, errors=errors, try_cast=try_cast)
         elif isinstance(cond, BooleanExpression):
             cond_script = " and ".join(cond.to_where_list())
-            if isinstance(other, _Frame):
-                select_list = [f"iif({cond_script},{self_col},{other_col}) as {self_col}"
-                               for self_col, other_col in zip(self._data_columns, other._data_columns)]
-                update_value = [f"iif({cond_script},{self_col},{other_col})"
-                                for self_col, other_col in zip(self._data_columns, other._data_columns)]
-            elif other is None or other is np.nan or other is float('nan'):
-                select_list = [f"iif({cond_script},{self_col},{self._ddb_dtypestr[self_col]}(NULL)) as {self_col}"
-                               for self_col in self._data_columns]
-                update_value = ["iif({cond_script},{self_col},{self._ddb_dtypestr[self_col]}(NULL))"
-                                for self_col in self._data_columns]
-            else:
-                other = to_dolphindb_literal(other)
-                select_list = [f"iif({cond_script},{self_col},{other}) as {self_col}"
-                               for self_col in self._data_columns]
-                update_value = [f"iif({cond_script},{self_col},{other})"
-                                for self_col in self._data_columns]
-            return self._execute_select_and_update(select_list, update_value, inplace, errors)
-        elif isinstance(cond, _Frame) or is_dolphindb_vector(cond):
-            if is_dolphindb_vector(cond):
-                from .series import Series
-                cond = Series(cond)
-
-            cond_var_name = cond._var_name
-            if isinstance(other, _Frame):
-                select_list = [f"iif({cond_var_name}.{cond_col},{self_col},{other_col}) as {self_col}"
-                               for cond_col, self_col, other_col in zip(cond._data_columns, self._data_columns, other._data_columns)]
-                update_value = [f"iif({cond_var_name}.{cond_col},{self_col},{other_col})"
-                                for cond_col, self_col, other_col in zip(cond._data_columns, self._data_columns, other._data_columns)]
-            elif other is None or other is np.nan or other is float('nan'):
-                select_list = [f"iif({cond_var_name}.{cond_col},{self_col},{self._ddb_dtypestr[self_col]}(NULL)) as {self_col}"
-                               for cond_col, self_col in zip(cond._data_columns, self._data_columns)]
-                update_value = [f"iif({cond_var_name}.{cond_col},{self_col},{self._ddb_dtypestr[self_col]}(NULL))"
-                                for cond_col, self_col in zip(cond._data_columns, self._data_columns)]
-            else:
-                select_list = [f"iif({cond_var_name}.{cond_col},{self_col},{other}) as {self_col}"
-                               for cond_col, self_col in zip(cond._data_columns, self._data_columns)]
-                update_value = [f"iif({cond_var_name}.{cond_col},{self_col},{other})"
-                                for cond_col, self_col in zip(cond._data_columns, self._data_columns)]
-            return self._execute_select_and_update(select_list, update_value, inplace, errors)
+            if isinstance(self,DataFrame):
+                # when self is DataFrame, other can not be series, or the axis must be setted, the pandas will process
+                # this situation
+                cond_list = cond.to_where_list()
+                if isinstance(other, ArithExpression) or isinstance(other, DataFrame):
+                    if self._var_name == other._var_name:
+                        other_data = other._get_data_select_list()
+                        select_list = [f"iif({cond_col},{self_col},{other_col}) as {self_col}"
+                                       for cond_col, self_col, other_col in zip(cond_list, self._data_columns, other_data)]
+                        update_value = [f"iif({cond_col},{self_col},{other_col})"
+                                        for cond_col, self_col, other_col in zip(cond_list, self._data_columns, other_data)]
+                    else:
+                        # We do not support self and other are not the same dataframe. So, just use pandas to support.
+                        return self._pandas_where(cond, other, inplace, axis, level, errors=errors, try_cast=try_cast)
+                elif other is None or other is np.nan or other is float('nan'):
+                    select_list = [f"iif({cond_col},{self_col},{self._ddb_dtypestr[self_col]}(NULL)) as {self_col}"
+                                   for cond_col, self_col in zip(cond_list, self._data_columns)]
+                    update_value = ["iif({cond_col},{self_col},{self._ddb_dtypestr[self_col]}(NULL))"
+                                    for cond_col, self_col in zip(cond_list, self._data_columns)]
+                else:
+                    other = to_dolphindb_literal(other)
+                    select_list = [f"iif({cond_col},{self_col},{other}) as {self_col}"
+                                   for cond_col, self_col in zip(cond_list, self._data_columns)]
+                    update_value = [f"iif({cond_col},{self_col},{other})"
+                                    for cond_col, self_col in zip(cond_list, self._data_columns)]
+                return self._execute_select_and_update(select_list, update_value, inplace, errors)
+            elif isinstance(self, Series):
+                if isinstance(other, ArithExpression) or isinstance(other, Series):
+                    if self._var_name == other._var_name:
+                        other_data = other._get_data_select_list()
+                        select_list = [f"iif({cond_script},{self_col},{other_col}) as {self_col}"
+                                       for self_col, other_col in zip(self._data_columns, other_data)]
+                        update_value = [f"iif({cond_script},{self_col},{other_col})"
+                                        for self_col, other_col in zip(self._data_columns, other_data)]
+                    else:
+                        return self._pandas_where(cond, other, inplace, axis, level, errors=errors, try_cast=try_cast)
+                elif other is None or other is np.nan or other is float('nan'):
+                    select_list = [f"iif({cond_script},{self_col},{self._ddb_dtypestr[self_col]}(NULL)) as {self_col}"
+                                   for self_col in self._data_columns]
+                    update_value = ["iif({cond_script},{self_col},{self._ddb_dtypestr[self_col]}(NULL))"
+                                    for self_col in self._data_columns]
+                else:
+                    other = to_dolphindb_literal(other)
+                    select_list = [f"iif({cond_script},{self_col},{other}) as {self_col}"
+                                   for self_col in self._data_columns]
+                    update_value = [f"iif({cond_script},{self_col},{other})"
+                                    for self_col in self._data_columns]
+                return self._execute_select_and_update(select_list, update_value, inplace, errors)
         else:
-            raise ValueError(f"unsupport cond type {type(cond)}")
+            # TODO : if cond is _Frame, this function can be optimized
+            return self._pandas_where(cond, other, inplace, axis, level, errors=errors, try_cast=try_cast)
 
     def _execute_select_and_update(self, select_script=None, update_value=None, inplace=False, errors="raise"):
         select_script = itertools.chain(self._index_columns, select_script)
@@ -532,3 +542,92 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
     def mask(self, cond, other=np.nan, inplace=False, axis=None, level=None, errors="raise", try_cast=False):
         return self.where(~cond, other=other, inplace=inplace, axis=axis,
                           level=level, errors=errors, try_cast=False)
+
+    def take(self, indices, axis=0, is_copy=False, **kwargs):
+        axis = _infer_axis(self, axis)
+        if axis == 0 or axis == 'index':
+            return self.iloc[indices]
+        elif axis == 1 or axis == 'columns':
+            return self.iloc[:, indices]
+        elif axis not in [0, 1]:
+            raise ValueError('axis must be either 0 or 1')
+
+    @property
+    def at(self):
+        from .indexing import _LocIndexer
+        return _LocIndexer(self)
+
+    @property
+    def iat(self):
+        from .indexing import _iLocIndexer
+        return _iLocIndexer(self)
+
+    def droplevel(self, level, axis=0):
+        session = self._session
+        if is_dolphindb_scalar(level):
+            level = (level,)
+        else:
+            level = _try_convert_iterable_to_list(level)
+
+        _unsupport_columns_axis(self, axis)
+
+        _, _, _, level_idx = _infer_level(level, self._index_map)
+        print("level_idx = ", level_idx)
+        index_map = [m for i, m in enumerate(self._index_map) if i not in level_idx]
+        print("index_map= ", index_map)
+        new_odf = _InternalFrame(session, self._var, index_map, self._data_columns,
+                                 self._column_index, self._column_index_names)
+        return self._with_where_expr(self._where_expr, new_odf)
+
+    def truncate(self, before=None, after=None, axis=None, copy=True):
+        if axis == "columns" or axis == 1:
+            return self.loc[:, before:after]
+        # TODO: Time type
+        else:
+            return self.loc[before:after]
+
+    def reorder_levels(self, order, axis=0):
+        session = self._session
+        if is_dolphindb_scalar(order):
+            level = (order,)
+        else:
+            level = _try_convert_iterable_to_list(order)
+
+        _unsupport_columns_axis(self, axis)
+        _, _, _, level_idx = _infer_level(level, self._index_map)
+
+        index_map = [self._index_map[i] for i in level_idx]
+        new_odf = _InternalFrame(session, self._var, index_map, self._data_columns,
+                                 self._column_index, self._column_index_names)
+        return self._with_where_expr(self._where_expr, new_odf)
+
+    def at_time(self, time, asof=False, axis=None):
+        if len(time) == 4:
+            time = f"0{time}"
+        where_list = f"minute({self._var_name}.{self._index_columns[0]}) = {time}m"
+        return self._with_where_expr(where_list, self)
+
+    def between_time(self, start_time, end_time, include_start=True, include_end=True, axis=None):
+        if include_start == False or include_end == False:
+            raise NotImplementedError("Do not support include")
+        if len(start_time) == 4:
+            start_time = f"0{start_time}"
+        if len(end_time) == 4:
+            end_time = f"0{end_time}"
+
+        session = self._session
+        flag = session.run(f"{start_time}m <= {end_time}m")
+        if flag:
+            where_list = f"between(minute({self._var_name}.{self._index_columns[0]}), {start_time}m:{end_time}m)"
+        else:
+            where_list = f"not between(minute({self._var_name}.{self._index_columns[0]}), {end_time}m:{start_time}m)"
+
+        return self._with_where_expr(where_list, self)
+
+    def equals(self, other):
+        script = f"each(eqObj, {self._var_name}.values(), {other._var_name}.values())"
+        res = self._session.run(script)[1:]
+        if False not in res:
+            return True
+        else:
+            return False

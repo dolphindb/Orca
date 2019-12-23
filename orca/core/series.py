@@ -1,18 +1,18 @@
 from typing import Iterable
 
-import dolphindb as ddb
-import numpy as np
 import pandas as pd
 
-# from .accessor import CachedAccessor
 from .base import _Frame
-from .indexes import Index, IndexOpsMixin, MultiIndex
+from .common import default_session
+from .datetimes import Timestamp
+from .indexes import Index, IndexOpsMixin
 from .indexing import _iLocIndexer, _LocIndexer
 from .internal import _ConstantSP, _InternalFrame
-from .operator import SeriesLike, BooleanExpression, LogicalOpsMixin, StatOpsMixin,IOOpsMixin
-from .common import default_session
-from .utils import (sql_select, _to_numpy_dtype, is_dolphindb_identifier,
-                             is_dolphindb_uploadable, to_dolphindb_literal)
+from .operator import BooleanExpression, IOOpsMixin, SeriesLike
+from .utils import (ORCA_COLUMN_NAME_FORMAT,
+                    _to_numpy_dtype, dolphindb_literal_types,
+                    dolphindb_numeric_types, dolphindb_temporal_types,
+                    is_datetimelike, is_dolphindb_identifier, sql_select)
 
 
 class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
@@ -26,7 +26,6 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
             self._where_expr = None
             self._name = None
             self._session = session
-            self._index = Index(index, session=session)
         elif isinstance(data, _InternalFrame):
             assert index is None
             assert dtype is None
@@ -45,9 +44,6 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
             raise NotImplementedError()
         elif isinstance(data, pd.Index):
             raise NotImplementedError()
-        # elif isinstance(data, np.ndarray):
-        #     odf = _InternalFrame.from_upload_obj(session, data)
-        #     _Frame.__init__(self, odf, session)
         else:
             if isinstance(data, pd.Series):    # TODO: index necessary ?
                 s = (data if index is None and dtype is None and name is None
@@ -60,6 +56,10 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
             df = DataFrame(s)    # TODO: directly create _InternalFrame?
             _Frame.__init__(self, df._internal, session)
         self._name = name
+        self._update_metadata(index)
+
+    def _update_metadata(self, index):
+        self._index = Index._from_internal(self._internal, index)
 
     def __getitem__(self, key):
         if isinstance(key, BooleanExpression):
@@ -126,8 +126,13 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
         self._name = value
 
     def rename(self, index=None, inplace=False):
+        if index == self._name:
+            if inplace:
+                return
+            else:
+                return self.copy()
         if index is None or not is_dolphindb_identifier(index):
-            column_name = "ORCA_COLUMN_LEVEL_0_"
+            column_name = ORCA_COLUMN_NAME_FORMAT(0)
         else:
             column_name = index
         if not isinstance(column_name, str):
@@ -201,9 +206,13 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
         if bins is not None:
             raise NotImplementedError()
         if dropna:
-            return self[self.notna()].groupby(self, sort=ascending).size()
+            res = self[self.notna()].groupby(self, sort=ascending).size()
         else:
-            return self.groupby(self, sort=ascending).size()
+            res = self.groupby(self, sort=False).size()
+        if sort:
+            return res.sort_values(ascending=ascending)
+        else:
+            return res
 
     def to_csv(self, engine="dolphindb", append=False, *args, **kwargs):
         names = [
@@ -285,12 +294,65 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
         return self
 
     @property
-    def hasnans(self):
-        return StatOpsMixin._unary_agg_op(self, "hasNull", None, False)
-
-    @property
     def nbytes(self):
         session = self._session
         script = sql_select(["bytes"],"objs()",where_expr=f"name = '{self._var_name}'" ,is_exec=True)
         script += "[0]"
         return session.run(script)
+
+    def __iter__(self):
+        column = f"{self._var_name}.{self._data_columns[0]}"
+        for i in range(len(self)):
+            if is_datetimelike(self._ddb_dtype):
+                yield Timestamp(self._session.run(column+f"[{i}]"))
+            else:
+                yield self._session.run(column+f"[{i}]")
+
+    def __index_iter__(self):
+        column = f"{self._var_name}.{self._index_columns[0]}"
+        for i in range(len(self)):
+            if is_datetimelike(self._ddb_dtype):
+                yield Timestamp(self._session.run(column+f"[{i}]"))
+            else:
+                yield self._session.run(column+f"[{i}]")
+
+    def items(self):
+        return zip(iter(self.__index_iter__()), iter(self))
+
+    def describe(self,  percentiles=None, include=None, exclude=None):
+        s = self
+        session = self._session
+        data_list = []
+        index_list = []
+        if s._ddb_dtype in dolphindb_numeric_types:
+            index_list = ['count', 'mean', 'std', 'min']
+            data_list = [s.count(), s.mean(), s.std(), s.min()]
+            if percentiles is None:
+                percentiles = [.25, .5, .75]
+            else:
+                if .5 not in percentiles:
+                    percentiles.append(.5)
+                percentiles.sort()
+            ref = _ConstantSP.upload_obj(session, percentiles)
+            for i in percentiles:
+                index_list.append(str(i*100)[:2] + '%')
+            data_list.extend(session.run(f"quantileSeries({self._var_name}.{self._data_columns[0]}, {ref.var_name})"))
+            index_list.append("max")
+            data_list.append(s.max())
+            #print("data_list= ",data_list)
+        elif s._ddb_dtype in dolphindb_literal_types:
+            index_list = ['count', 'unique', 'top', 'freq']
+            data_list = [s.count(), len(s.unique())]
+            x = s.value_counts()
+            data_list.append(session.run(f"{x._var_name}.{x._index_columns[0]}[0]"))
+            data_list.append(x.iloc[0])
+        elif s._ddb_dtype in dolphindb_temporal_types:
+            index_list = ['count', 'unique', 'top', 'freq', 'first', 'last']
+            data_list = [s.count(), len(s.unique())]
+            x = s.value_counts()
+            data_list.append(session.run(f"{x._var_name}.{x._index_columns[0]}[0]"))
+            data_list.append(x.iloc[0])
+            data_list.append(s.first())
+            data_list.append(s.last())
+
+        return pd.Series(data=data_list, index=index_list)

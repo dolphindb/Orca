@@ -3,16 +3,15 @@ import warnings
 from typing import Iterable, List, Optional, Tuple, Union
 
 import dolphindb as ddb
-import numpy as np
 import pandas as pd
 from pandas.api.types import is_list_like
 
-from .common import AttachDefaultIndexWarning, warn_not_dolphindb_identifier, _get_verbose
-from .utils import (ORCA_INDEX_NAME_FORMAT, _get_uuid_ddb, _to_column_index,
-                    _to_index_map, _to_numpy_dtype, check_key_existence,
-                    dolphindb_temporal_types, is_dolphindb_identifier,
-                    is_dolphindb_vector, sql_select, sql_update,
-                    to_dolphindb_literal)
+from .common import (AttachDefaultIndexWarning, _get_verbose,
+                     _warn_not_dolphindb_identifier)
+from .utils import (ORCA_COLUMN_NAME_FORMAT, ORCA_INDEX_NAME_FORMAT,
+                    _new_orca_identifier, _to_column_index, _to_index_map,
+                    check_key_existence, is_dolphindb_identifier, sql_select,
+                    sql_update, to_dolphindb_literal)
 
 IndexMap = Tuple[str, Optional[Tuple[str, ...]]]
 
@@ -30,6 +29,7 @@ class _ConstantSP(object):
     .. note:: this is an internal class. It is not supposed to be exposed to
         users and users should not directly access to it.
     """
+    ORCA_IDENTIFIER = "ORCA_"
 
     def __init__(self, session, id):
         self._id = id
@@ -75,23 +75,23 @@ class _ConstantSP(object):
 
     @property
     def var_name(self):    # TODO: lazyproperty?
-        return "orca_obj_" + self._id
+        return _ConstantSP.ORCA_IDENTIFIER + self._id
 
     @property
     def _var_name(self):    # TODO: lazyproperty?
-        return "orca_obj_" + self._id
+        return _ConstantSP.ORCA_IDENTIFIER + self._id
 
     @classmethod
     def upload_obj(cls, session, obj):
-        obj_id = _get_uuid_ddb()
-        var_name = "orca_obj_" + obj_id
+        obj_id = _new_orca_identifier()
+        var_name = _ConstantSP.ORCA_IDENTIFIER + obj_id
         session.upload({var_name: obj})
         return cls(session, obj_id)
 
     @classmethod
     def run_script(cls, session, script):
-        obj_id = _get_uuid_ddb()
-        var_name = "orca_obj_" + obj_id
+        obj_id = _new_orca_identifier()
+        var_name = _ConstantSP.ORCA_IDENTIFIER + obj_id
         if _get_verbose():
             print(script)
         session.run(f"&{var_name} = ({script})")
@@ -197,6 +197,7 @@ class _ConstantSP(object):
         if _get_verbose():
             print(f"rename!({var_name}, {old_names_literal}, {new_names_literal})")
         session.run(f"rename!({var_name}, {old_names_literal}, {new_names_literal})")
+        self._update_metadata()
 
     def reset_with_script(self, script):
         session, var_name = self._session, self.var_name
@@ -237,6 +238,8 @@ class _ConstantSP(object):
             return False
         form, var_name = self._form, self.var_name
         size = len(self)
+        if size <= 0:
+            return False
         if form == ddb.settings.DF_TABLE:
             column_names = [ORCA_INDEX_NAME_FORMAT(0)]
             new_values = [f"0..{size-1}"]
@@ -244,46 +247,27 @@ class _ConstantSP(object):
                 self._sql_update(column_names, new_values)
             except RuntimeError as ex:
                 ex_msg = str(ex)
-                if ex_msg.startswith("The table is not allowed to update"):
+                if (ex_msg.startswith("The table is not allowed to update")
+                        or ex_msg.startswith("<Server Exception> in run: The category")
+                        or ex_msg.startswith("<Server Exception> in run: The data type")
+                        or ex_msg.endswith("the table shouldn't be shared and the size of the new column must equal to the size of the table.")):
                     warnings.warn("Unable to attach an default index to the table.", AttachDefaultIndexWarning)
                     return False
                 else:
-                    raise ex
+                    raise
         elif form == ddb.settings.DF_VECTOR:
             script = f"table({var_name}, 0..{size-1} as {ORCA_INDEX_NAME_FORMAT(0)})"
             self.reset_with_script(script)
         return True
 
-    # def attach_index(self, index):
-    #     from .indexes import Index, RangeIndex, DatetimeIndex, MultiIndex
-    #     assert isinstance(index, Index)
-    #     session, form = self._session, self._form
-    #     var_name = self.var_name
-    #     if form == ddb.settings.DF_TABLE:
-    #         update_list = ",".join(index._get_update_list())
-    #         # print(f"update {var_name} set {update_list}")    # TODO: debug info
-    #         session.run(f"update {var_name} set {update_list}")
-    #     elif form == ddb.settings.DF_VECTOR:
-    #         index_list = ",".join(index._get_data_select_list())
-    #         # print(f"&{var_name} = table({var_name},{index_list})")    # TODO: debug info
-    #         session.run(f"&{var_name} = table({var_name},{index_list})")
-    #     else:
-    #         raise TypeError("Only DolphinDB tables and vectors are able to construct an _InternalFrame")
-    #     self._update_metadata()
-    #     real_column_names = index._real_column_names
-    #     idx_odf = _InternalFrame(session, self, real_column_names)
-    #     if isinstance(index, RangeIndex):
-    #         return RangeIndex._from_internal_frame_and_range(
-    #             session, idx_odf, index)
-    #     elif isinstance(index, DatetimeIndex):
-    #         name, freq, dtype = index.name, index.freq, index.dtype
-    #         return DatetimeIndex._from_internal_frame(
-    #             session, idx_odf, name, freq, dtype)
-    #     elif isinstance(index, MultiIndex):
-    #         return MultiIndex._from_internal_frame(
-    #             session, idx_odf, names=index.names)
-    #     else:
-    #         return Index(idx_odf, name=index.name, session=session)    # TODO: use _from_internal_frame?
+    def as_frame(self, name):
+        form, var_name = self._form, self.var_name
+        assert form == ddb.settings.DF_VECTOR
+        if name is None or not is_dolphindb_identifier(name):
+            _warn_not_dolphindb_identifier()
+            name = ORCA_INDEX_NAME_FORMAT(0)
+        script = f"table({var_name} as {name})"
+        self.reset_with_script(script)
 
 
 class _InternalAccessor(object):
@@ -353,11 +337,11 @@ class _InternalAccessor(object):
 
     @property
     def _index_names(self):
-        return self._internal.index_names
+        return self._internal._index_names
 
     @property
     def _index_name(self):
-        return self._internal.index_name
+        return self._internal._index_name
 
     @property
     def _schema(self):
@@ -388,10 +372,6 @@ class _InternalAccessor(object):
     @property
     def _var(self):
         return self._internal.var
-
-    # @property
-    # def _index(self):
-    #     return self._internal.index
 
 
 class _InternalFrame(object):
@@ -481,17 +461,22 @@ class _InternalFrame(object):
         return cls(session, var)
 
     @classmethod
-    def from_pandas(cls, session, pdf: pd.DataFrame):
+    def from_pandas(cls, session, pdf: Union[pd.DataFrame, pd.Index]):
+        if isinstance(pdf, pd.Index):
+            var = _ConstantSP.upload_obj(session, pdf.to_numpy())
+            var.as_frame(name=pdf.name)
+            index_map = _to_index_map(pdf)
+            return cls(session, var, index_map)
         columns = pdf.columns
         if len(columns) == 0 and len(pdf) == 0:    # trivial case
             pdf.index = pd.RangeIndex(0)
         if isinstance(columns, pd.RangeIndex):
-            warn_not_dolphindb_identifier()
-            data_columns = [f"ORCA_COLUMN_LEVEL_{i}_" for i, _ in enumerate(columns)]
+            _warn_not_dolphindb_identifier()
+            data_columns = [f"{ORCA_COLUMN_NAME_FORMAT(i)}" for i, _ in enumerate(columns)]
         else:
             data_columns = ["_".join(column) if isinstance(column, tuple)
                                 else column if is_dolphindb_identifier(column)
-                                else f"ORCA_COLUMN_LEVEL_{i}_"
+                                else f"{ORCA_COLUMN_NAME_FORMAT(i)}"
                             for i, column in enumerate(columns)]
         column_index = _to_column_index(columns)
         column_index_names = columns.names
@@ -568,7 +553,8 @@ class _InternalFrame(object):
 
     @property
     def index_names(self):
-        return [name for _, name in self._index_map]
+        return [name[0] if isinstance(name, tuple) else name
+                for _, name in self._index_map]
         # name = self.index_map[0][1]
         # if name is not None:
         #     return name[0]
@@ -582,6 +568,14 @@ class _InternalFrame(object):
             return name[0]
         else:
             return name
+
+    @property
+    def _index_names(self):
+        return self.index_names
+    
+    @property
+    def _index_name(self):
+        return self.index_name
 
     # @property
     # def use_range_index(self):
@@ -736,20 +730,6 @@ class _InternalFrame(object):
         self._data_columns = new_data_columns
         self._column_index = new_column_index
         self._update_data_select_list()
-
-    # def attach_index(self, index):
-    #     from .indexes import RangeIndex
-    #     # if isinstance(index, RangeIndex) and not self.in_memory:
-    #     if isinstance(index, RangeIndex) and self.segmented:
-    #         return index    # TODO: warning?
-    #     elif isinstance(index, RangeIndex) and index._internal is None:
-    #         return self.var.attach_index(index)
-    #     elif index.var_name == self.var_name:
-    #         return index    # index is already in the table
-    #     elif self.segmented:
-    #         raise ValueError("Unable to add an index to a segmented table")
-    #     else:
-    #         return self.var.attach_index(index)
 
     def get_script_with_unary_op(self, func):
         data_columns = self.data_columns

@@ -1,5 +1,3 @@
-import datetime
-import itertools
 import warnings
 from typing import Iterable
 
@@ -7,9 +5,8 @@ import numpy as np
 import pandas as pd
 
 from .common import default_session, _set_verbose
-from .datetimes import Timestamp
 from .frame import DataFrame
-from .indexes import DatetimeIndex, Index, IndexOpsMixin
+from .indexes import Index, IndexOpsMixin
 from .internal import _ConstantSP, _InternalFrame
 from .operator import ArithExpression, BooleanExpression
 from .series import Series
@@ -270,7 +267,6 @@ def read_csv(path, sep=',', delimiter=None, names=None,  index_col=None,
         delimiter = ','
 
     try:
-        #print(f"extractTextSchema({path_name})")
         schema = _ConstantSP.run_script(session, f"extractTextSchema({path_name},'{delimiter}')")
     except RuntimeError:
         raise RuntimeError("The file might not exsit")
@@ -373,11 +369,16 @@ def read_csv(path, sep=',', delimiter=None, names=None,  index_col=None,
     return data
 
 
-def read_table(database, table, partition=None, session=default_session()):
+def read_shared_table(table_name, session=default_session()):
+    data = _InternalFrame.from_run_script(session, table_name)
+    return DataFrame(data, session=session)
+
+
+def read_table(database, table_name, partition=None, session=default_session()):
     partition = "NULL" if partition is None else partition
     script = "loadTable({}, {}, {})".format(
         to_dolphindb_literal(database),
-        to_dolphindb_literal(table),
+        to_dolphindb_literal(table_name),
         partition
     )
     data = _InternalFrame.from_run_script(session, script)     # TODO: In-memory?
@@ -480,13 +481,6 @@ def save_table(db_path, table_name, df, ignore_index=True, session=default_sessi
         db_handle_var = _ConstantSP.run_script(session, f"database({db_handle})")
         table_name = to_dolphindb_literal(table_name)
         session.run(f"saveTable({db_handle_var._var_name},{df_script},{table_name})")
-
-
-def merge(left, right, *args, **kwargs):
-    if not isinstance(left, DataFrame):
-        raise TypeError(f"Can only merge Series or DataFrame objects, a {type(left)} was passed")
-    return left.merge(right, *args, **kwargs)
-
 
 
 def isna(obj):

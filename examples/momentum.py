@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 US = 'C:/DolphinDB/Orca/databases/USstocks.csv'
 
-orca.connect('localhost', 8848)
+orca.connect('localhost', 8848, 'admin', '123456')
 
 
 def load_price_data(df):

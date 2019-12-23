@@ -78,19 +78,24 @@ class IndexOpsMixin(ArithOpsMixin, LogicalOpsMixin, metaclass=abc.ABCMeta):
 
     @property
     def is_monotonic(self):
-        return self._unary_agg_op("isMonotonic", level=None, numeric_only=False)
+        return self._unary_agg_op("isSorted", axis=None, level=None, numeric_only=False)
 
     @property
     def is_monotonic_increasing(self):
-        return self._unary_agg_op("isMonotonicIncreasing", level=None, numeric_only=False)
+        return self._unary_agg_op("isSorted", axis=None, level=None, numeric_only=False)
 
     @property
     def is_monotonic_decreasing(self):
-        return self._unary_agg_op("isMonotonicDecreasing", level=None, numeric_only=False)
+        return self._unary_agg_op("isSorted{,false}", axis=None, level=None, numeric_only=False)
 
     @property
     def is_unique(self):
-        return self.nunique == len(self)
+        len_self = len(self)
+        return len_self == 1 or self.nunique == len_self
+
+    @property
+    def hasnans(self):
+        return self._unary_agg_op("hasNull", axis=None, level=None, numeric_only=False)
 
     def _unary_op(self, *args, **kwargs):
         return ArithOpsMixin._unary_op(self, *args, **kwargs)
@@ -144,16 +149,17 @@ class IndexOpsMixin(ArithOpsMixin, LogicalOpsMixin, metaclass=abc.ABCMeta):
         NotImplementedError
             To be implemented.
         """
-        _INDEX_NAME = "ORCA_DIFFERENT_INDICES_INDEX"
+        from .merge import _generate_joiner
         _COLUMN_NAME = "ORCA_DIFFERENT_INDICES_COLUMN"
 
         if other.is_series_like:
             session = self._session
+            self_var_name, other_var_name = self._var_name, other._var_name
             self_column_name = self._data_columns[0]
             other_column_name = other._data_columns[0]
-            select_list = [f"{func}(tmp1.{self_column_name}, tmp2.{other_column_name}) as {_COLUMN_NAME}"]
-            index_list, from_clause = self._generate_joiner(
-                self._var_name, other._var_name, self._index_columns, other._index_columns)
+            select_list = [f"{func}({self_var_name}.{self_column_name}, {other_var_name}.{other_column_name}) as {_COLUMN_NAME}"]
+            index_list, from_clause = _generate_joiner(
+                self_var_name, other_var_name, self._index_columns, other._index_columns)
             select_list = itertools.chain(index_list, select_list)
             script = sql_select(select_list, from_clause)
             # print(script)    # TODO: debug info
@@ -196,9 +202,12 @@ class Index(IndexLike, _InternalAccessor, IndexOpsMixin, IOOpsMixin):
             else:
                 idx = pd.Index(data=data, dtype=dtype, copy=False, name=name,
                                tupleize_cols=tupleize_cols)    # TODO: copy = True or False ?, freq?
-            var = _ConstantSP.upload_obj(session, idx.to_numpy())
-            IndexOpsMixin.__init__(self, var, session)
-            self._name = idx.name
+            # var = _ConstantSP.upload_obj(session, idx.to_numpy())
+            # var._framize(name=idx.name)
+            # IndexOpsMixin.__init__(self, var, session)
+            # self._name = idx.name
+            odf = _InternalFrame.from_pandas(session, idx)
+            IndexOpsMixin.__init__(self, odf, session)
         self._where_expr = None
 
     def __repr__(self):
@@ -234,7 +243,9 @@ class Index(IndexLike, _InternalAccessor, IndexOpsMixin, IOOpsMixin):
         """
         session = odf._session
         if index is None or not isinstance(index, pd.DatetimeIndex):
-            if len(odf.index_map) == 1:
+            if odf.is_any_vector:
+                index = Index(index, session=session)
+            elif len(odf.index_map) == 1:
                 if odf._ddb_dtypes[odf._index_columns[0]] in dolphindb_temporal_types:
                     index = DatetimeIndex._from_internal(odf, index)
                 else:
@@ -363,18 +374,13 @@ class Index(IndexLike, _InternalAccessor, IndexOpsMixin, IOOpsMixin):
         return self.to_numpy()
 
     @property
-    def hasnans(self):
-        session = self._session
-        return session.run(f"hasNull({self._var_name})")
-
-    @property
     def shape(self):
         return (len(self),)
 
     @property
     def nbytes(self):
         session = self._session
-        script = sql_select(["bytes"],"objs()",where_expr=f"name = '{self._var_name}'" ,is_exec=True)
+        script = sql_select(["bytes"], "objs()", where_expr=f"name='{self._var_name}'", is_exec=True)
         script += "[0]"
         return session.run(script)
 
@@ -628,12 +634,13 @@ class DatetimeIndex(DatetimeProperties, Index):
     def _from_internal(cls, odf, index):
         obj = cls(odf, session=odf._session)
         if index is None:
-            sample_script = sql_select(odf._index_columns, odf._var_name, is_exec=True, limit=3)
-            sample_data = odf._session.run(sample_script)
-            try:
-                obj._freq = pd.infer_freq(pd.DatetimeIndex(sample_data))
-            except ValueError:
-                obj._freq = None
+            # sample_script = sql_select(odf._index_columns, odf._var_name, is_exec=True, limit=3)
+            # sample_data = odf._session.run(sample_script)
+            # try:
+            #     obj._freq = pd.infer_freq(pd.DatetimeIndex(sample_data))
+            # except ValueError:
+            #     obj._freq = None
+            obj._freq = None
             obj._dtype = None
             obj._tz = None
         else:
@@ -674,6 +681,14 @@ class DatetimeIndex(DatetimeProperties, Index):
         return pd.DatetimeIndex(data=data, freq=self._freq, tz=self._tz).set_names(self._name)
         # return pd.DatetimeIndex(data=pdf, freq=self._freq, dtype=self._dtype)
 
+    def _logical_unary_op(self, func):
+        from .operator import BooleanExpression
+        return BooleanExpression(self, None, func, 1)
+
+    def _unary_op(self, func, infered_ddb_dtypestr):
+        from .operator import ArithExpression
+        return ArithExpression(self, None, func, 0,
+                               infered_ddb_dtypestr=infered_ddb_dtypestr)
 
 class PeriodIndex(Index):
 

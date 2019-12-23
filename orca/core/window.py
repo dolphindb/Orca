@@ -2,29 +2,60 @@ import abc
 import itertools
 from typing import Iterable
 
-import dolphindb as ddb
 from pandas.tseries.frequencies import to_offset
 
 from .indexes import DatetimeIndex
 from .internal import _InternalAccessor
-from .operator import DataFrameLike, EwmOpsMixin, SeriesLike, WindowOpsMixin
+from .operator import DataFrameLike, EwmOpsMixin, SeriesLike, StatOpsMixin
 from .utils import (
     _scale_nanos, check_key_existence, dolphindb_numeric_types,
     dolphindb_temporal_types, get_orca_obj_from_script, sql_select,
     to_dolphindb_literal)
 
 
+def _orca_window_op(func, numeric_only, use_moving_template=False):
+    def wfunc(self):
+        return self._window_op(func, numeric_only, use_moving_template)
+    return wfunc
+
+
+class WindowOpsMixin(metaclass=abc.ABCMeta):
+
+    count = _orca_window_op("count", numeric_only=False)
+    sum = _orca_window_op("sum", numeric_only=True)
+    mean = _orca_window_op("avg", numeric_only=True)
+    median = _orca_window_op("med", numeric_only=True)
+    var = _orca_window_op("var", numeric_only=True)
+    std = _orca_window_op("std", numeric_only=True)
+    min = _orca_window_op("min", numeric_only=True)
+    max = _orca_window_op("max", numeric_only=True)
+    skew = _orca_window_op("skew", numeric_only=True, use_moving_template=True)
+    kurtosis = _orca_window_op("kurtosis", numeric_only=True, use_moving_template=True)
+    kurt = kurtosis
+    argmax = _orca_window_op("imax", numeric_only=False)
+    argmin = _orca_window_op("imin", numeric_only=False)
+
+    @abc.abstractmethod
+    def _window_op(self, func, numeric_only, use_moving_template):
+        pass
+
+
 class Rolling(_InternalAccessor, WindowOpsMixin, metaclass=abc.ABCMeta):
 
     _ROLLING_COLUMN = "ORCA_ROLLING_COLUMN"
 
-    def __init__(self, session, internal, index, window, on, where_expr, name):
+    def __init__(self, session, internal, index, window, on, where_expr, name, rolling_on_temporal=None):
         self._session = session
         self._internal = internal
         self._index = index
         self._on = on
         self._where_expr = where_expr
         self._name = name
+        
+        if rolling_on_temporal is not None:
+            self._window = window
+            self._rolling_on_temporal = rolling_on_temporal
+            return
 
         if on is not None:
             check_key_existence(on, self._data_columns)
@@ -62,7 +93,8 @@ class Rolling(_InternalAccessor, WindowOpsMixin, metaclass=abc.ABCMeta):
         else:
             raise KeyError(key)
         new_odf = self._internal[key]
-        return klass(self._session, new_odf, self._index, self._window, self._on, self._where_expr, name)
+        return klass(self._session, new_odf, self._index, self._window,
+                     self._on, self._where_expr, name, self._rolling_on_temporal)
 
     def _match_offset(self, rule):
         offset = to_offset(rule)
@@ -96,20 +128,31 @@ class Rolling(_InternalAccessor, WindowOpsMixin, metaclass=abc.ABCMeta):
         else:
             return data
 
+    def _get_data_select_list(self):
+        return self._data_columns
+
     def _window_op_on_non_temporal(self, func, numeric_only, use_moving_template):
-        on = self._on
-        _, cols_with_on = self._cols_with_and_without_on(numeric_only)
-        if use_moving_template:
-            gen_moving_col = "moving({func}, {col}, {window}) as {col}"
+        if self.is_series_like:
+            window = self._window
+            if use_moving_template:
+                func = f"moving{{{func},,{window}}}"
+            else:
+                func = f"m{func}{{,{window}}}"
+            return StatOpsMixin._unary_op(self, func, numeric_only)
         else:
-            gen_moving_col = "m{func}({col}, {window}) as {col}"
-        select_list = (gen_moving_col.format(func=func, col=col, window=self._window)
-                       if col != on else col
-                       for col in cols_with_on)
-        select_list = itertools.chain(self._index_columns, select_list)
-        script = sql_select(select_list, self._var_name, self._where_expr)
-        return get_orca_obj_from_script(
-            self._session, script, self._index_map, name=self._name)
+            on = self._on
+            _, cols_with_on = self._cols_with_and_without_on(numeric_only)
+            if use_moving_template:
+                gen_moving_col = "moving({func}, {col}, {window}) as {col}"
+            else:
+                gen_moving_col = "m{func}({col}, {window}) as {col}"
+            select_list = (gen_moving_col.format(func=func, col=col, window=self._window)
+                        if col != on else col
+                        for col in cols_with_on)
+            select_list = itertools.chain(self._index_columns, select_list)
+            script = sql_select(select_list, self._var_name, self._where_expr)
+            return get_orca_obj_from_script(
+                self._session, script, self._index_map, name=self._name)
 
     def _window_op_on_temporal(self, func, numeric_only):
         on = self._on

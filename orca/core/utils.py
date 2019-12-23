@@ -1,10 +1,10 @@
 # coding=utf-8
-import re
 import itertools
+import json
 from typing import Iterable, List, Tuple, Optional, Union
-import uuid
+import string
+import random
 
-from pandas.core.dtypes.generic import ABCIndex, ABCIndexClass, ABCSeries
 from pandas.tseries.frequencies import to_offset
 import pandas as pd
 import numpy as np
@@ -12,7 +12,7 @@ import numpy as np
 import dolphindb as ddb
 import dolphindb.settings as types
 
-from .common import warn_not_dolphindb_identifier
+from .common import _warn_not_dolphindb_identifier
 
 dolphindb_numeric_types = [
     ddb.settings.DT_BOOL,
@@ -58,6 +58,10 @@ def ORCA_INDEX_NAME_FORMAT(i):
     return f"ORCA_INDEX_LEVEL_{i}_"
 
 
+def ORCA_COLUMN_NAME_FORMAT(i):
+    return f"ORCA_COLUMN_LEVEL_{i}_"
+
+
 def _to_freq(dtype):
     freq_str = _TYPE_TO_FREQ.get(dtype, None)
     if freq_str is None:
@@ -74,9 +78,9 @@ def is_bool_indexer(key):
     return True
 
 
-def _get_uuid_ddb():
-    uuid_ = uuid.uuid4()
-    return str(uuid_).replace("-", "")
+def _new_orca_identifier():
+    LEN = 16
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=LEN))
 
 
 def exec_prev(sdf):
@@ -352,7 +356,8 @@ def _to_index_map(index, all_columns=None):
     else:
         index_columns = index
     if all_columns is None:
-        return [(ORCA_INDEX_NAME_FORMAT(i) if name is None else name,
+        return [(ORCA_INDEX_NAME_FORMAT(i) if name is None
+                    or not is_dolphindb_identifier(name) else name,
                  name if name is None or isinstance(name, tuple) else (name,))
                 for i, name in enumerate(index_columns)]
     else:
@@ -371,14 +376,17 @@ def _to_column_index(columns):
         return [col if isinstance(col, tuple) else (col,) for col in columns]
 
 
-def _unsupport_columns_axis(self, axis):
+def _unsupport_columns_axis(self, axis):    # TODO: common.py?
     axis = _infer_axis(self, axis)
     if axis == 1:
         raise NotImplementedError("Orca does not support axis == 1")
     return axis
 
 
-def get_orca_obj_from_script(session, script, index_map, data_columns=None, column_index=None, name=None, squeeze=False, squeeze_axis=None, as_index=False):
+def get_orca_obj_from_script(
+        session, script, index_map, data_columns=None, column_index=None,
+        column_index_names=None, name=None, squeeze=False, squeeze_axis=None,
+        as_index=False):
     """
     Create an orca object by executing a DolphinDB script. Type of the
     returned object is automatically deduced from the form of execution
@@ -445,7 +453,7 @@ def get_orca_obj_from_script(session, script, index_map, data_columns=None, colu
             odf = _InternalFrame(session, var, index_map=index_map)
             return Series(odf, name=name, session=session)
     elif form == ddb.settings.DF_TABLE:
-        odf = _InternalFrame(session, var, index_map=index_map, column_index=column_index)
+        odf = _InternalFrame(session, var, index_map=index_map, column_index=column_index, column_index_names=column_index_names)
         if squeeze and axis in (1, None) and len(odf.data_columns) == 1:
             if as_index:
                 return var.squeeze([], as_index=True, squeeze_axis=axis)
@@ -460,7 +468,9 @@ def get_orca_obj_from_script(session, script, index_map, data_columns=None, colu
 def _try_convert_iterable_to_list(iterable):
     from .series import Series
     from .operator import BaseExpression
-    if isinstance(iterable, list):
+    if iterable is None:
+        return []
+    elif isinstance(iterable, list):
         return iterable
     elif isinstance(iterable, (str, Series, BaseExpression)):
         return [iterable]
@@ -505,6 +515,9 @@ _TYPE_TO_TYPE_STR = {
     types.DT_STRING: "string",
     types.DT_SYMBOL: "symbol",
 }
+
+def is_datetimelike(type):
+    return type in dolphindb_temporal_types
 
 def to_dolphindb_type_name(ddb_dtype):
     type_name = _TYPE_TO_TYPE_STR.get(ddb_dtype, None)
@@ -606,7 +619,7 @@ def is_dolphindb_identifier(var_name):
              and not var_name.startswith("_")
              and var_name.isidentifier())
     if not is_id:
-        warn_not_dolphindb_identifier()
+        _warn_not_dolphindb_identifier()
     return is_id
 
 
@@ -614,10 +627,10 @@ def to_dolphindb_literal(obj):
     if obj is float('nan') or obj is np.NaN:
         return "NULL"
     elif isinstance(obj, str):
-        return re.escape(f'"{obj}"')
+        return json.dumps(obj)
     elif (isinstance(obj, (list, tuple))
             and all(isinstance(o, str) for o in obj)):
-        return "[" + ",".join(re.escape(f'"{o}"') for o in obj) + "]"
+        return "[" + ",".join(json.dumps(o) for o in obj) + "]"
     else:
         return str(obj)
 
