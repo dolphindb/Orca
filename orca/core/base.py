@@ -15,7 +15,8 @@ from .utils import (_infer_axis, _infer_level, _merge_where_expr, _to_data_colum
                     check_key_existence, get_orca_obj_from_script,
                     is_dolphindb_integral, sql_select, sql_update,
                     to_dolphindb_literal, is_dolphindb_scalar,
-                    _try_convert_iterable_to_list, _unsupport_columns_axis)
+                    _try_convert_iterable_to_list, _unsupport_columns_axis, _get_time_str,
+                    dolphindb_temporal_types)
 
 
 class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, metaclass=abc.ABCMeta):
@@ -48,7 +49,7 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         assert isinstance(key, (BooleanExpression, tuple))
         where_expr = _merge_where_expr(self._where_expr, key)
         df = self._with_where_expr(where_expr, self._internal)
-        if df.is_series_like:
+        if df._is_series_like:
             df._name = self._name
         return df
 
@@ -117,8 +118,10 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         var = _ConstantSP.run_script(session, script)
         if squeeze and len(var) == 1:
             if cls is Series:
-                data_column = data_columns[0]
-                script = f"{var._var_name}['{data_column}', 0]"
+                data_column = to_dolphindb_literal(data_columns[0])
+                script = f"{var._var_name}[{data_column}, 0]"
+                if _get_verbose():
+                    print(script)
                 return session.run(script)
             else:
                 index_columns = [index_column for index_column, _ in index_map]
@@ -129,7 +132,7 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         if squeeze and squeeze_axis in (1, None) and len(odf.data_columns) == 1:
             return Series(odf, name=name, session=session)
         obj = cls(odf, session=session)
-        if obj.is_series_like:
+        if obj._is_series_like:
             obj.name = name
         return obj
 
@@ -141,15 +144,6 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
             return f"<{type_str} object representing a column in a DolphinDB segmented table>"
         else:
             return self.to_pandas().__repr__()
-
-    # def __getattr__(self, name):
-    #     try:
-    #         return self.__getitem__(name)
-    #     except KeyError:
-    #         raise AttributeError(
-    #             f"'{self.__class__.__name__}' object has no attribute '{name}'")
-    #     except RuntimeError:
-    #         return object.__getattribute__(self, name)
 
     def __len__(self):
         if self._where_expr is None:
@@ -172,7 +166,10 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         return None
     
     def to_pandas(self):    # TODO: optimize
-        data = self._session.run(self._to_script())
+        script = self._to_script()
+        if _get_verbose():
+            print(script)
+        data = self._session.run(script)
         index_columns = self._index_columns
         names = self.index.names if len(index_columns) > 1 else self.index.name
         if index_columns:
@@ -198,7 +195,6 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         select_list = itertools.chain(index_columns, data_columns)
         script = sql_select(select_list, self._var_name, self._where_expr,
                             orderby_list=orderby_list, asc=asc, limit=limit, is_exec=is_exec)
-        # print(script)    # TODO: debug info
         return script
 
     def compute(self, data_columns=None, as_non_segmented=False, limit=None, squeeze=False, squeeze_axis=None):
@@ -249,7 +245,7 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         else:
             column_index = None
         index_map = [] if ignore_index else None
-        name = self._name if self.is_series_like else None
+        name = self._name if self._is_series_like else None
         return self._get_from_script(
             session, script, self, index_map=index_map,
             data_columns=data_columns, column_index=column_index,
@@ -289,12 +285,17 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
 
     @property
     @abc.abstractmethod
-    def is_dataframe_like(self):
+    def loc(self):
         pass
 
     @property
     @abc.abstractmethod
-    def is_series_like(self):
+    def _is_dataframe_like(self):
+        pass
+
+    @property
+    @abc.abstractmethod
+    def _is_series_like(self):
         pass
 
     @property
@@ -304,6 +305,8 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
     def __array__(self, dtype=None):
         # this function is to support some library like numpy to init data
         return np.asarray(self.array, dtype)
+
+    __array_priority__ = 10    # support operation with NumPy
 
     @property
     def index(self):
@@ -394,7 +397,7 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
                                  data_columns=data_columns, column_index=column_index)
 
         if inplace:
-            if self.is_series_like:
+            if self._is_series_like:
                 raise TypeError("Cannot reset_index inplace on a Series to create a DataFrame")
             self._internal = new_odf
             self._index = Index._from_internal(new_odf)
@@ -404,7 +407,7 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         return DataFrame._with_where_expr(self._where_expr, new_odf)
 
     def unstack(self, level=-1, fill_value=None):
-        if self.is_dataframe_like:
+        if self._is_dataframe_like:
             raise NotImplementedError()
         if len(self._index_columns) != 2:
             raise ValueError("Index levels must be exactly 2 due to the limitations of DolphinDB. Use droplevel to drop unneeded levels")
@@ -470,11 +473,11 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         if callable(cond) or callable(other) or axis !=None or level !=None:
             return self._pandas_where(cond, other, inplace, axis, level, errors=errors, try_cast=try_cast)
         elif isinstance(cond, BooleanExpression):
-            cond_script = " and ".join(cond.to_where_list())
+            cond_script = " and ".join(cond._to_where_list())
             if isinstance(self,DataFrame):
                 # when self is DataFrame, other can not be series, or the axis must be setted, the pandas will process
                 # this situation
-                cond_list = cond.to_where_list()
+                cond_list = cond._to_where_list()
                 if isinstance(other, ArithExpression) or isinstance(other, DataFrame):
                     if self._var_name == other._var_name:
                         other_data = other._get_data_select_list()
@@ -572,19 +575,34 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
         _unsupport_columns_axis(self, axis)
 
         _, _, _, level_idx = _infer_level(level, self._index_map)
-        print("level_idx = ", level_idx)
         index_map = [m for i, m in enumerate(self._index_map) if i not in level_idx]
-        print("index_map= ", index_map)
         new_odf = _InternalFrame(session, self._var, index_map, self._data_columns,
                                  self._column_index, self._column_index_names)
         return self._with_where_expr(self._where_expr, new_odf)
 
     def truncate(self, before=None, after=None, axis=None, copy=True):
+        def gettimestr(time):
+            if time is None:
+                return ""
+            p = "0000.01.01T00:00:00.000000000"
+            temp = str(time)
+            temp = temp + p[len(temp):]
+
+            return temp.replace('-', '.')
+
         if axis == "columns" or axis == 1:
             return self.loc[:, before:after]
-        # TODO: Time type
+
         else:
-            return self.loc[before:after]
+            if self.index._ddb_dtype not in dolphindb_temporal_types:
+                return self.loc[before:after]
+            else:
+                start_str = gettimestr(before)
+                end_str = gettimestr(after)
+                where_list = f"between(nanotimestamp({self._var_name}.{self._index_columns[0]}), {start_str}:{end_str})"
+                return self._with_where_expr(where_list, self)
+
+
 
     def reorder_levels(self, order, axis=0):
         session = self._session
@@ -592,6 +610,8 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
             level = (order,)
         else:
             level = _try_convert_iterable_to_list(order)
+            if len(level) > len(set(level)):
+                raise IndexError("Cannot support same Index")
 
         _unsupport_columns_axis(self, axis)
         _, _, _, level_idx = _infer_level(level, self._index_map)
@@ -601,33 +621,57 @@ class _Frame(_InternalAccessor, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, me
                                  self._column_index, self._column_index_names)
         return self._with_where_expr(self._where_expr, new_odf)
 
+    def swaplevel(self, i=-2, j=-1, axis=0):
+        session = self._session
+        level = [i, j]
+
+        _unsupport_columns_axis(self, axis)
+        _, _, _, level_idx = _infer_level(level, self._index_map)
+
+        index_map = self._index_map
+        temp = index_map[level_idx[0]]
+        index_map[level_idx[0]] = index_map[level_idx[1]]
+        index_map[level_idx[1]] = temp
+        new_odf = _InternalFrame(session, self._var, index_map, self._data_columns,
+                                 self._column_index, self._column_index_names)
+        return self._with_where_expr(self._where_expr, new_odf)
+
     def at_time(self, time, asof=False, axis=None):
-        if len(time) == 4:
-            time = f"0{time}"
-        where_list = f"minute({self._var_name}.{self._index_columns[0]}) = {time}m"
+        timestr = _get_time_str(time)
+        where_list = f"minute({self._var_name}.{self._index_columns[0]}) = {timestr}m"
         return self._with_where_expr(where_list, self)
 
     def between_time(self, start_time, end_time, include_start=True, include_end=True, axis=None):
         if include_start == False or include_end == False:
             raise NotImplementedError("Do not support include")
-        if len(start_time) == 4:
-            start_time = f"0{start_time}"
-        if len(end_time) == 4:
-            end_time = f"0{end_time}"
+        start_str = _get_time_str(start_time)
+        end_str = _get_time_str(end_time)
 
         session = self._session
-        flag = session.run(f"{start_time}m <= {end_time}m")
+        flag = session.run(f"{start_str}m <= {end_str}m")
         if flag:
-            where_list = f"between(minute({self._var_name}.{self._index_columns[0]}), {start_time}m:{end_time}m)"
+            where_list = f"between(minute({self._var_name}.{self._index_columns[0]}), {start_str}m:{end_str}m)"
         else:
-            where_list = f"not between(minute({self._var_name}.{self._index_columns[0]}), {end_time}m:{start_time}m)"
+            where_list = f"not between(minute({self._var_name}.{self._index_columns[0]}), {end_str}m:{start_str}m)"
 
         return self._with_where_expr(where_list, self)
 
     def equals(self, other):
-        script = f"each(eqObj, {self._var_name}.values(), {other._var_name}.values())"
-        res = self._session.run(script)[1:]
-        if False not in res:
+        #list_self = [f"{self._var_name}.{x}" for x in self._data_columns]
+        #list_other = [f"{other._var_name}.{x}" for x in other._data_columns]
+        script = "eqObj(["
+        for i in range(0, len(self._data_columns)-1):
+            script = script + f"{self._var_name}.{self._data_columns[i]}, "
+        script = script + f"{self._var_name}.{self._data_columns[len(self._data_columns)-1]}], ["
+        for i in range(0, len(other._data_columns)-1):
+            script = script + f"{other._var_name}.{other._data_columns[i]}, "
+        script = script + f"{other._var_name}.{other._data_columns[len(self._data_columns) - 1]}])"
+        #script = f"eqObj( {to_dolphindb_literal(list_self)} , {to_dolphindb_literal(list_other)})"
+        #script = f"each(eqObj, {self._var_name}.values(), {other._var_name}.values())"
+        #script = f"each(eqObj, {self._var_name}.{self._data_columns}.values(), {other._var_name}.{other._data_columns}.values())"
+
+        res = self._session.run(script)
+        if res:
             return True
         else:
             return False

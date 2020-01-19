@@ -152,7 +152,7 @@ class IndexOpsMixin(ArithOpsMixin, LogicalOpsMixin, metaclass=abc.ABCMeta):
         from .merge import _generate_joiner
         _COLUMN_NAME = "ORCA_DIFFERENT_INDICES_COLUMN"
 
-        if other.is_series_like:
+        if other._is_series_like:
             session = self._session
             self_var_name, other_var_name = self._var_name, other._var_name
             self_column_name = self._data_columns[0]
@@ -162,13 +162,12 @@ class IndexOpsMixin(ArithOpsMixin, LogicalOpsMixin, metaclass=abc.ABCMeta):
                 self_var_name, other_var_name, self._index_columns, other._index_columns)
             select_list = itertools.chain(index_list, select_list)
             script = sql_select(select_list, from_clause)
-            # print(script)    # TODO: debug info
             index_map = [(s_map[0], None if s_map[1] != o_map[1] else s_map[1])
                          for s_map, o_map
                          in zip(self._internal.index_map, other._internal.index_map)]
             return self._get_from_script(
                 session, script, data_columns=[_COLUMN_NAME], index_map=index_map)
-        elif other.is_dataframe_like:
+        elif other._is_dataframe_like:
             raise NotImplementedError()
 
 class Index(IndexLike, _InternalAccessor, IndexOpsMixin, IOOpsMixin):
@@ -616,7 +615,6 @@ class DatetimeIndex(DatetimeProperties, Index):
         elif isinstance(data, pd.DatetimeIndex):
             data = (data if freq is None and dtype is None and tz is None
                     else pd.DatetimeIndex(data, freq=freq, dtype=dtype, tz=tz))
-            # TODO: DatetimeIndex now uses nanoseconds as accuracy
             Index.__init__(self, data, session=session)
             self._freq = data.freq
             self._dtype = data.dtype

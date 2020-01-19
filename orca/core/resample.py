@@ -86,12 +86,12 @@ class Resampler(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def is_series_like(self):
+    def _is_series_like(self):
         pass
 
     @property
     @abc.abstractmethod
-    def is_dataframe_like(self):
+    def _is_dataframe_like(self):
         pass
 
     def __getitem__(self, key):
@@ -232,7 +232,6 @@ class Resampler(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
         select_list = itertools.chain(contextby_list, select_list)
         script = sql_select(select_list, self._var_name, self._where_expr,
                             groupby_list=self._groupby_list, is_groupby=False)
-        # print(script)    # TODO: debug info
         return self._run_groupby_script(func, script, self._contextby_result_index_map)
 
 

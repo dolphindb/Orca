@@ -841,7 +841,7 @@
     5    2.5
     dtype: float64
 
-    >>> os.os.rank().compute()
+    >>> os.os_numerical.rank().compute()
     # output
     0    3
     1    4

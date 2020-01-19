@@ -29,14 +29,14 @@ def _raise_must_compute_error(msg):
 
 def _warn_not_dolphindb_identifier():
     warnings.warn("The DataFrame contains an invalid column name for "
-                  "DolphinDB. Will convert to an automatically "
+                  "DolphinDB. It will be converted to an automatically "
                   "generated column name.", NotDolphinDBIdentifierWarning)
 
 
 def _warn_apply_callable():
-    warnings.warn("Applying a callable to an Orca object will converting "
-                  "the object to pandas object, applying the callable, "
-                  "and converting back to an Orca object", ApplyCallableWarning)
+    warnings.warn("Applying a callable to an Orca object will convert "
+                  "the object to a pandas object, apply the callable, "
+                  "and then convert back to an Orca object", ApplyCallableWarning)
 
 
 class CopiedTableWarning(Warning):

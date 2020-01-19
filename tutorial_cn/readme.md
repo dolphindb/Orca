@@ -7,3 +7,4 @@
 - [Orca对DolphinDB分布式表的操作](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/operations_on_distributed_database.md)
 - [使用Orca开发量化策略](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/momentum_strategy.md)
 - [使用Orca计算策略因子](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/factor.md)
+- [DolphinDB NumPy使用教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/dolphindb_numpy.md)

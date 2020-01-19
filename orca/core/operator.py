@@ -2,25 +2,27 @@ import abc
 import itertools
 import warnings
 from enum import Enum
-from typing import Callable
+from typing import Callable, Iterable
 
 import dolphindb as ddb
+import numpy as np
 import pandas as pd
 from pandas.tseries.frequencies import to_offset
 
 from .common import _raise_must_compute_error, _warn_apply_callable
 from .datetimes import Timestamp
 from .internal import _ConstantSP, _InternalAccessor, _InternalFrame
-from .utils import (
-    ORCA_INDEX_NAME_FORMAT, _infer_axis, _infer_level, is_dolphindb_vector,
-    _merge_where_expr, _scale_nanos, _try_convert_iterable_to_list,
-    _unsupport_columns_axis, check_key_existence, dolphindb_numeric_types,
-    dolphindb_temporal_types, get_orca_obj_from_script, is_dolphindb_scalar,
-    is_dolphindb_uploadable, sql_select, to_dolphindb_literal)
+from .utils import (ORCA_INDEX_NAME_FORMAT, _infer_axis, _infer_level,
+                    _merge_where_expr, _scale_nanos,
+                    _try_convert_iterable_to_list, _unsupport_columns_axis,
+                    check_key_existence, dolphindb_numeric_types,
+                    dolphindb_temporal_types, get_orca_obj_from_script,
+                    is_dolphindb_scalar, is_dolphindb_uploadable,
+                    is_dolphindb_vector, sql_select, to_dolphindb_literal)
 
 
 def _default_axis(obj):
-    return 0 if obj.is_series_like else 1
+    return 0 if obj._is_series_like else 1
 
 
 def _orca_unary_op(func, numeric_only):
@@ -82,8 +84,14 @@ def _orca_logical_unary_op(func):
 
 
 def _orca_ewm_op(func):
-    def efunc(self):
-        return self._ewm_op(func)
+    def efunc(self, bias=False):
+        return self._ewm_op(func, bias)
+    return efunc
+
+
+def _orca_ewm_covcorr(func):
+    def efunc(self, other=None, bias=False, method='pearson', min_periods=1):
+        return self._ewm_covcorr(func, other, bias, method, min_periods)
     return efunc
 
 
@@ -110,6 +118,7 @@ def _get_expr_with_binary_op(ExpressionType, left, right, func):
     from .indexes import Index, MultiIndex, DatetimeIndex
     from .frame import DataFrame
     from .series import Series
+    from .merge import MergeExpression
 
     if (isinstance(left, (pd.DataFrame, pd.Series, pd.Index))
         or isinstance(right, (pd.DataFrame, pd.Series, pd.Index))):
@@ -140,8 +149,21 @@ def _get_expr_with_binary_op(ExpressionType, left, right, func):
     elif isinstance(right, (_ConstantSP, Timestamp)):
         left_obj, right_obj = left, right
         axis = _default_axis(left)
+    elif isinstance(left, MergeExpression) or isinstance(right, MergeExpression):
+        if ((isinstance(left, MergeExpression)
+                and isinstance(right, MergeExpression)
+                and left._from_clause != right._from_clause)
+            or (isinstance(left, MergeExpression)
+                    and not isinstance(right, MergeExpression)
+                    and left._left_var_name != right._var_name
+                    and left._right_var_name != right._var_name)
+            or (isinstance(right, MergeExpression)
+                    and not isinstance(left, MergeExpression)
+                    and left._var_name != right._left_var_name
+                    and left._var_name != right._right_var_name)):
+            raise ValueError("left and right object must be the same MergeExpression")
     elif (not isinstance(left, (DataFrame, Series, ArithExpression, BooleanExpression))
-          or not isinstance(left, (DataFrame, Series, ArithExpression, BooleanExpression))):
+          or not isinstance(right, (DataFrame, Series, ArithExpression, BooleanExpression))):
          raise TypeError(f"Unsupported operand types: '{left.__class__.__name__}' "
                          f"and '{right.__class__.__name__}'") 
     elif (left._index_map != right._index_map
@@ -188,45 +210,45 @@ def _check_rank_arguments(axis, method, na_option, ascending, pct, rank_from_zer
 class DataFrameLike(object):
 
     @property
-    def is_index_like(self):
+    def _is_index_like(self):
         return False
 
     @property
-    def is_series_like(self):
+    def _is_series_like(self):
         return False
 
     @property
-    def is_dataframe_like(self):
+    def _is_dataframe_like(self):
         return True
 
 
 class SeriesLike(object):
 
     @property
-    def is_index_like(self):
+    def _is_index_like(self):
         return False
 
     @property
-    def is_series_like(self):
+    def _is_series_like(self):
         return True
 
     @property
-    def is_dataframe_like(self):
+    def _is_dataframe_like(self):
         return False
 
 
 class IndexLike(object):
     
     @property
-    def is_series_like(self):
+    def _is_series_like(self):
         return True
 
     @property
-    def is_dataframe_like(self):
+    def _is_dataframe_like(self):
         return False
 
     @property
-    def is_index_like(self):
+    def _is_index_like(self):
         return True
 
 
@@ -250,6 +272,11 @@ class ArithOpsMixin(metaclass=abc.ABCMeta):
     rmod = _orca_extended_reversed_binary_op("mod")
     rpow = _orca_extended_reversed_binary_op("pow")
 
+    lshift = _orca_extended_binary_op("lshift")
+    rshift = _orca_extended_binary_op("rshift")
+    rlshift = _orca_extended_reversed_binary_op("lshift")
+    rrshift = _orca_extended_reversed_binary_op("rshift")
+
     __add__ = _orca_binary_op("add")
     __sub__ = _orca_binary_op("sub")
     __mul__ = _orca_binary_op("mul")
@@ -268,13 +295,29 @@ class ArithOpsMixin(metaclass=abc.ABCMeta):
     __rmod__ = _orca_reversed_binary_op("mod")
     __rpow__ = _orca_reversed_binary_op("pow")
 
+    __lshift__ = _orca_binary_op("lshift")
+    __rshift__ = _orca_binary_op("rshift")
+    __rlshift__ = _orca_reversed_binary_op("lshift")
+    __rrshift__ = _orca_reversed_binary_op("rshift")
+
     __neg__ = _orca_unary_op("neg", numeric_only=False)
+    
+    def __pos__(self):
+        return self
 
     def __divmod__(self, other):
         return self // other, self % other
 
     def __rdivmod__(self, other):
         return other // self, other % self
+
+    def divmod(self, other, axis=None, level=None, fill_value=None):
+        return (self.floordiv(other, axis=axis, level=level, fill_value=fill_value),
+                self.mod(other, axis=axis, level=level, fill_value=fill_value))
+
+    def rdivmod(self, other, axis=None, level=None, fill_value=None):
+        return (self.rfloordiv(other, axis=axis, level=level, fill_value=fill_value),
+                self.rmod(other, axis=axis, level=level, fill_value=fill_value))
 
     @abc.abstractmethod
     def _binary_op(self, other, func):
@@ -292,12 +335,12 @@ class ArithOpsMixin(metaclass=abc.ABCMeta):
             elif is_dolphindb_uploadable(other):
                 return type(self)._binary_op(self, other, func)
             if (axis == 0
-                and (self.is_series_like or self.is_dataframe_like)
-                and other.is_series_like):
+                and (self._is_series_like or self._is_dataframe_like)
+                and other._is_series_like):
                 return self._binary_op(other, func)
             elif (axis == 1
-                  and self.is_dataframe_like
-                  and other.is_dataframe_like):
+                  and self._is_dataframe_like
+                  and other._is_dataframe_like):
                 return self._binary_op(other, func)
             else:
                 raise NotImplementedError()
@@ -307,12 +350,12 @@ class ArithOpsMixin(metaclass=abc.ABCMeta):
             elif is_dolphindb_uploadable(other):
                 return type(self)._binary_op(self.fillna(fill_value), other, func)
             if (axis == 0
-                and (self.is_series_like or self.is_dataframe_like)
-                and other.is_series_like):
+                and (self._is_series_like or self._is_dataframe_like)
+                and other._is_series_like):
                 return self.fillna(fill_value)._binary_op(other.fillna(fill_value), func)
             elif (axis == 1
-                  and self.is_dataframe_like
-                  and other.is_dataframe_like):
+                  and self._is_dataframe_like
+                  and other._is_dataframe_like):
                 return self.fillna(fill_value)._binary_op(other.fillna(fill_value), func)
             else:
                 raise NotImplementedError()
@@ -337,9 +380,15 @@ class LogicalOpsMixin(metaclass=abc.ABCMeta):
     __ge__ = ge
     __eq__ = eq
     __ne__ = ne
-    __and__ = _orca_logical_op("and")
-    __or__ = _orca_logical_op("or")
-    __invert__ =_orca_logical_unary_op("not")
+    __and__ = _orca_logical_op("and")           # logical_and
+    __or__ = _orca_logical_op("or")             # logical_or
+    __xor__ = _orca_logical_op("bitXor")        # bitwise_xor
+    __invert__ =_orca_logical_unary_op("not")   # logical_not
+
+    bitwise_and = _orca_logical_op("bitAnd")
+    bitwise_or = _orca_logical_op("bitOr")
+    bitwise_not = _orca_logical_unary_op("bitNot")
+    logical_xor = _orca_logical_op("xor")
 
     isnull = _orca_logical_unary_op("isNull")
     notnull = _orca_logical_unary_op("isValid")
@@ -366,7 +415,7 @@ class LogicalOpsMixin(metaclass=abc.ABCMeta):
             raise TypeError("only list-like objects are allowed to be passed to isin()")
 
     def duplicated(self, subset=None, keep="first"):
-        if subset is not None and self.is_series_like:
+        if subset is not None and self._is_series_like:
             raise TypeError("duplicated() got an unexpected keyword argument 'subset'")
 
         data_columns = self._data_columns
@@ -388,7 +437,7 @@ class LogicalOpsMixin(metaclass=abc.ABCMeta):
         return self._logical_unary_op(func)
 
     def between(self, left, right, inclusive=True):
-        if self.is_dataframe_like:
+        if self._is_dataframe_like:
             raise AttributeError("'DataFrame' object has no attribute 'between'")
         if not inclusive:
             raise NotImplementedError()
@@ -429,7 +478,7 @@ class LogicalOpsMixin(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def _logical_unary_op(self, func):
-        return BooleanExpression(self, None, func, 1)
+        return BooleanExpression(self, None, func, 0)
 
 
 class StatOpsMixin(metaclass=abc.ABCMeta):
@@ -479,6 +528,15 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
 
     wavg = _orca_binary_agg_op("wavg")
     wsum = _orca_binary_agg_op("wsum")
+
+    sinh = _orca_unary_op("sinh", numeric_only=True)
+    cosh = _orca_unary_op("cosh", numeric_only=True)
+    tanh = _orca_unary_op("tanh", numeric_only=True)
+    arcsinh = _orca_unary_op("arcsinh", numeric_only=True)
+    arccosh = _orca_unary_op("arccosh", numeric_only=True)
+    arctanh = _orca_unary_op("arctanh", numeric_only=True)
+    deg2rad = _orca_unary_op("deg2rad", numeric_only=True)
+    rad2deg = _orca_unary_op("rad2deg", numeric_only=True)
 
     _ROW_WISE_OPS = {
         "sum": "rowSum",
@@ -536,15 +594,16 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
                            for select_col, col in zip(select_columns, data_columns)
                            if not numeric_only or ddb_dtypes[col] in dolphindb_numeric_types]
             script = sql_select(select_list, self._var_name, self._where_expr,
-                                groupby_list, is_exec=self.is_series_like)
-            name = self._name if self.is_series_like else None
+                                groupby_list, is_exec=self._is_series_like)
+            name = self._name if self._is_series_like else None
         return get_orca_obj_from_script(
             self._session, script, index_columns, name=name,
-            squeeze=True, squeeze_axis=0, as_index=self.is_index_like)
+            squeeze=True, squeeze_axis=0, as_index=self._is_index_like)
 
     @abc.abstractmethod
     def _binary_agg_op(self, other, func):
-        if not self.is_series_like or not other.is_series_like:
+        session = self._session
+        if not self._is_series_like or not other._is_series_like:
             raise NotImplementedError()
         self_select_columns = self._get_data_select_list()
         other_select_columns = other._get_data_select_list()
@@ -553,16 +612,16 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
                        for self_select_col, other_select_col, col
                        in zip(self_select_columns, other_select_columns, data_columns)]
         script = sql_select(select_list, self._var_name, self._where_expr,
-                            is_exec=self.is_series_like)
-        name = self._name if self.is_series_like else None
+                            is_exec=self._is_series_like)
+        name = self._name if self._is_series_like else None
         return get_orca_obj_from_script(
-            self._session, script, self._index_columns, name=name, squeeze=True, squeeze_axis=0)
+            session, script, self._index_columns, name=name, squeeze=True, squeeze_axis=0)
 
     def skew(self, axis=None, skipna=None, level=None, numeric_only=None):
-        return self._unary_agg_op("skew{,false}", None, None, False)
+        return self._unary_agg_op("skew{,false}", None, level, False)
 
     def kurt(self, axis=None, skipna=None, level=None, numeric_only=None):
-        return self._unary_agg_op("(x->kurtosis(x,false)-3)", None, None, False)
+        return self._unary_agg_op("(x->kurtosis(x,false)-3)", None, level, False)
     
     kurtosis = kurt
 
@@ -570,10 +629,10 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
         from .frame import DataFrame
         if min_periods != 1:
             raise NotImplementedError()
-        if self.is_series_like and other is None:
+        if self._is_series_like and other is None:
             raise TypeError(f"{func}() missing 1 required positional argument: 'other'")
         session = self._session
-        if self.is_dataframe_like:
+        if self._is_dataframe_like:
             ref = self.compute()
             ddb_dtypes = ref._ddb_dtypes
             numeric_columns = [col for col in ref._data_columns if ddb_dtypes[col] in dolphindb_numeric_types]
@@ -619,8 +678,27 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
         if interpolation not in ("linear", "lower", "higher", "midpoint", "nearest"):
             raise ValueError("interpolation can only be 'linear', 'lower' 'higher', 'midpoint', or 'nearest'")
         interpolation = to_dolphindb_literal(interpolation)
-        func = f"quantile{{,{q},{interpolation}}}"
-        return self._unary_agg_op(func, None, level=None, numeric_only=True)
+        if is_dolphindb_scalar(q) and q >= 0 and q <= 1:
+            func = f"quantile{{,{q},{interpolation}}}"
+            return self._unary_agg_op(func, None, level=None, numeric_only=True)
+        elif isinstance(q, Iterable) and all(qi >= 0 and qi <= 1 for qi in q):
+            session, ddb_dtypes = self._session, self._ddb_dtypes
+            var = _ConstantSP.upload_obj(session, np.array(q))
+            # func = f"quantileSeries{{,{var.var_name},{interpolation}}}"
+            self_select_columns = self._get_data_select_list()
+            data_columns = self._data_columns
+            select_list = [f"quantileSeries({self_select_col},{var.var_name},{interpolation}) as {col}"
+                           for self_select_col, col
+                           in zip(self_select_columns, data_columns)
+                           if ddb_dtypes[col] in dolphindb_numeric_types]
+            select_list += [f"{var.var_name} as {ORCA_INDEX_NAME_FORMAT(0)}"]
+            script = sql_select(select_list, self._var_name, self._where_expr)
+            name = self._name if self._is_series_like else None
+            index_map = [(ORCA_INDEX_NAME_FORMAT(0), None)]
+            return get_orca_obj_from_script(
+                session, script, index_map, name=name, squeeze=True, squeeze_axis=1)
+        else:
+            raise ValueError("percentiles should all be in the interval [0, 1]. Try [0.005 0.03 ] instead.")
 
     def clip(self, lower=None, upper=None, axis=0, inplace=False, *args, **kwargs):
         _unsupport_columns_axis(self, axis)
@@ -646,6 +724,9 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
     def clip_upper(self, threshold, axis=0, inplace=False):
         return self.clip(upper=threshold, axis=axis, inplace=inplace)
 
+    _fmax = _orca_binary_op("max")
+    _fmin = _orca_binary_op("min")
+
     def idxmax(self, axis=0, skipna=True):
         _unsupport_columns_axis(self, axis)
         index_column = self._index_columns[0]
@@ -657,7 +738,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
         return self._unary_agg_op(f"atImin{{, {index_column}}}", None, None, False)
 
     def drop_duplicates(self, subset=None, keep='first', inplace=False):
-        if subset is not None and self.is_series_like:
+        if subset is not None and self._is_series_like:
             raise TypeError("drop_duplicates() got an unexpected keyword argument 'subset'")
 
         if inplace:
@@ -678,7 +759,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
         from .frame import DataFrame
         _warn_apply_callable()
         pdf = self.to_pandas().__getattr__(apply_func)(func=func, **kwargs)
-        if self.is_series_like:
+        if self._is_series_like:
             return Series(pdf, session=self._session)
         else:
             return DataFrame(pdf, session=self._session)
@@ -691,7 +772,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
             return self._convert_and_apply_func("apply", func, **kwargs)
 
     def applymap(self, func):
-        if self.is_series_like:
+        if self._is_series_like:
             raise AttributeError("'Series' object has no attribute 'applymap'")
         if isinstance(func, str):
             return self._unary_op(func, numeric_only=False)
@@ -720,7 +801,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
     # def asof(self, where, subset=None):
     #     ref = self.compute()
     #     data_columns = ref._data_columns
-    #     if subset is not None and ref.is_dataframe_like:
+    #     if subset is not None and ref._is_dataframe_like:
     #         subset, _ = check_key_existence(subset, data_columns)
     #     else:
     #         subset = data_columns
@@ -890,12 +971,13 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
                 group_keys=True, squeeze=False, observed=False, ascending=True,
                 lazy=False, **kwargs):
         from .groupby import DataFrameGroupBy, SeriesGroupBy
+        from .merge import MergeExpression
         if by is not None:
             by = _try_convert_iterable_to_list(by)
-        klass = SeriesGroupBy if self.is_series_like else DataFrameGroupBy
+        klass = SeriesGroupBy if self._is_series_like else DataFrameGroupBy
         if not lazy and isinstance(self, (ArithExpression, BooleanExpression)):
             internal = self.compute()
-        elif isinstance(self, (ArithExpression, BooleanExpression)):
+        elif isinstance(self, (ArithExpression, BooleanExpression, MergeExpression)):
             internal = self
         else:
             internal = self._internal
@@ -908,7 +990,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
         self._validate_resample_arguments(how=how, axis=axis, fill_method=fill_method, closed=closed,
                                           label=label, convention=convention, kind=kind, loffset=loffset,
                                           limit=limit, base=base, on=on, level=level)
-        klass = SeriesResampler if self.is_series_like else DataFrameResampler
+        klass = SeriesResampler if self._is_series_like else DataFrameResampler
         if not lazy and isinstance(self, (ArithExpression, BooleanExpression)):
             internal = self.compute()
         elif isinstance(self, (ArithExpression, BooleanExpression)):
@@ -919,7 +1001,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
 
     def rolling(self, window, min_periods=None, center=False, win_type=None, on=None, axis=0, closed=None):
         from .window import DataFrameRolling, SeriesRolling
-        klass = SeriesRolling if self.is_series_like else DataFrameRolling
+        klass = SeriesRolling if self._is_series_like else DataFrameRolling
         if on is not None and not isinstance(on, str):
             raise TypeError("on must be a string")
         ref = self.compute() if isinstance(self, (ArithExpression, BooleanExpression)) else self
@@ -927,12 +1009,12 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
 
     def ewm(self, com=None, span=None, halflife=None, alpha=None, min_periods=0, adjust=True, ignore_na=False, axis=0):
         from .window import DataFrameEwm, SeriesEwm
-        klass = SeriesEwm if self.is_series_like else DataFrameEwm
+        klass = SeriesEwm if self._is_series_like else DataFrameEwm
         ref = self.compute() if isinstance(self, (ArithExpression, BooleanExpression)) else self
         return klass(ref._session, ref._internal, ref._index, com, span, halflife, alpha, min_periods, adjust, ignore_na, where_expr=ref._where_expr)
 
     def _sorting(self, orderby_list, asc):
-        name = None if self.is_dataframe_like else self._name
+        name = None if self._is_dataframe_like else self._name
         script = self._to_script(orderby_list=orderby_list, asc=asc)
         return self._get_from_script(
             self._session, script, index_map=self._index_map, name=name)
@@ -944,7 +1026,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
             raise ValueError("Orca does not support inplace sort")
         if na_position != 'first':
             raise NotImplementedError()
-        if self.is_dataframe_like:
+        if self._is_dataframe_like:
             if by is None:
                 raise ValueError("by must be provided for DataFrame")
             by, _ = check_key_existence(by, self._data_columns)
@@ -968,7 +1050,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
     @property
     def str(self):
         from .strings import StringMethods
-        if not self.is_series_like:
+        if not self._is_series_like:
             raise AttributeError("'DataFrame' object has no attribute 'str'")
         if self._ddb_dtypes[self._data_columns[0]] not in (ddb.settings.DT_STRING, ddb.settings.DT_SYMBOL):
             raise AttributeError("Can only use .str accessor with string values!")
@@ -977,7 +1059,7 @@ class StatOpsMixin(metaclass=abc.ABCMeta):
     @property
     def dt(self):    # TODO: cache reference
         from .datetimes import DatetimeMethods
-        if not self.is_series_like:
+        if not self._is_series_like:
             raise AttributeError("'DataFrame' object has no attribute 'dt'")
         if self._ddb_dtypes[self._data_columns[0]] not in dolphindb_temporal_types:
             raise AttributeError("Can only use .dt accessor with datetimelike values!")
@@ -989,8 +1071,8 @@ class EwmOpsMixin(metaclass=abc.ABCMeta):
     mean = _orca_ewm_op("ewmMean")
     std = _orca_ewm_op("ewmStd")
     var = _orca_ewm_op("ewmVar")
-    corr = _orca_ewm_op("ewmCorr")
-    cov = _orca_ewm_op("ewmCov")
+    corr = _orca_ewm_covcorr("ewmCorr")
+    cov = _orca_ewm_covcorr("ewmCov")
 
 class IOOpsMixin(metaclass=abc.ABCMeta):
 
@@ -1034,6 +1116,8 @@ class BaseExpression(_InternalAccessor):
     def __init__(self, left, right, func, axis, infered_ddb_dtypestr=None):
         from .base import _Frame
         from .indexes import IndexOpsMixin
+        # ._left and ._right are merely for saving references to manage memory
+        # they are not used anywhere else
         self._left = left
         self._right = right
         self._func = func
@@ -1052,41 +1136,41 @@ class BaseExpression(_InternalAccessor):
         self._session = core_obj._session
         # prepare the select list
         if isinstance(other_obj, (_ConstantSP, Timestamp)):
-            self._is_index_like = core_obj.is_index_like
-            self._is_series_like = core_obj.is_series_like
-            self._is_dataframe_like = core_obj.is_dataframe_like
+            self._is_index_like = core_obj._is_index_like
+            self._is_series_like = core_obj._is_series_like
+            self._is_dataframe_like = core_obj._is_dataframe_like
             self._internal = core_obj._internal
             if isinstance(left, _ConstantSP) and axis == 0:
-                self._data_select_list = [f"{func}({left._var_name}, {script})"
+                self._data_select_list = [f"{func}({left._var_name},{script})"
                                           for script in right._get_data_select_list()]
             elif isinstance(left, Timestamp) and axis == 0:
                 if self._infered_ddb_dtypestr is not None:
                     typestrs = [self._infered_ddb_dtypestr]
                 else:
                     typestrs = (right._ddb_dtypestr[col] for col in right._data_columns)
-                self._data_select_list = [f"{func}({typestr}({left._var_name}), {script})"
+                self._data_select_list = [f"{func}({typestr}({left._var_name}),{script})"
                                           for typestr, script in zip(typestrs, right._get_data_select_list())]
             elif isinstance(left, _ConstantSP) and axis == 1:
-                self._data_select_list = [f"{func}({left._var_name}[{i}], {script})"
+                self._data_select_list = [f"{func}({left._var_name}[{i}],{script})"
                                           for i, script in enumerate(right._get_data_select_list())]
             elif isinstance(right, _ConstantSP) and axis == 0:
-                self._data_select_list = [f"{func}({script}, {right._var_name})"
+                self._data_select_list = [f"{func}({script},{right._var_name})"
                                           for script in left._get_data_select_list()]
             elif isinstance(right, Timestamp) and axis == 0:
                 if self._infered_ddb_dtypestr is not None:
                     typestrs = [self._infered_ddb_dtypestr]
                 else:
                     typestrs = (left._ddb_dtypestr[col] for col in left._data_columns)
-                self._data_select_list = [f"{func}({script}, {typestr}({right._var_name}))"
+                self._data_select_list = [f"{func}({script},{typestr}({right._var_name}))"
                                           for typestr, script in zip(typestrs, left._get_data_select_list())]
             elif isinstance(right, _ConstantSP) and axis == 1:
-                self._data_select_list = [f"{func}({script}, {right._var_name}[{i}])"
+                self._data_select_list = [f"{func}({script},{right._var_name}[{i}])"
                                           for i, script in enumerate(left._get_data_select_list())]
         elif right is None:
             self._internal = left._internal
-            self._is_index_like = left.is_index_like
-            self._is_series_like = left.is_series_like
-            self._is_dataframe_like = left.is_dataframe_like
+            self._is_index_like = left._is_index_like
+            self._is_series_like = left._is_series_like
+            self._is_dataframe_like = left._is_dataframe_like
 
             if isinstance(func, dict):
                 left_data_columns = left._data_columns
@@ -1101,34 +1185,34 @@ class BaseExpression(_InternalAccessor):
                 left_scripts = left._get_data_select_list()
                 self._data_select_list = [f"{func}({left_script})" for left_script in left_scripts]
         else:
-            self._is_index_like = core_obj.is_index_like and other_obj.is_index_like
-            self._is_series_like = core_obj.is_series_like and other_obj.is_series_like
-            self._is_dataframe_like = core_obj.is_dataframe_like or other_obj.is_dataframe_like
+            self._is_index_like = core_obj._is_index_like and other_obj._is_index_like
+            self._is_series_like = core_obj._is_series_like and other_obj._is_series_like
+            self._is_dataframe_like = core_obj._is_dataframe_like or other_obj._is_dataframe_like
             self._internal = core_obj._internal
-            if core_obj.is_dataframe_like:
+            if core_obj._is_dataframe_like:
                 self._internal = core_obj._internal
-            elif core_obj.is_series_like and other_obj.is_series_like:
+            elif core_obj._is_series_like and other_obj._is_series_like:
                 self._internal = core_obj._internal
             else:
                 self._internal = other_obj._internal
-            if left.is_series_like and right.is_series_like:
+            if left._is_series_like and right._is_series_like:
                 left_script = left._get_data_select_list()[0]
                 right_script = right._get_data_select_list()[0]
-                self._data_select_list = [f"{func}({left_script}, {right_script})"]
-            elif left.is_series_like and right.is_dataframe_like:
+                self._data_select_list = [f"{func}({left_script},{right_script})"]
+            elif left._is_series_like and right._is_dataframe_like:
                 left_script = left._get_data_select_list()[0]
                 right_scripts = right._get_data_select_list()
-                self._data_select_list = [f"{func}({left_script}, {right_script})"
+                self._data_select_list = [f"{func}({left_script},{right_script})"
                                           for right_script in right_scripts]
-            elif left.is_dataframe_like and right.is_series_like:
+            elif left._is_dataframe_like and right._is_series_like:
                 left_scripts = left._get_data_select_list()
                 right_script = right._get_data_select_list()[0]
-                self._data_select_list = [f"{func}({left_script}, {right_script})"
+                self._data_select_list = [f"{func}({left_script},{right_script})"
                                           for left_script in left_scripts]
-            elif left.is_dataframe_like and right.is_dataframe_like:
+            elif left._is_dataframe_like and right._is_dataframe_like:
                 left_scripts = left._get_data_select_list()
                 right_scripts = right._get_data_select_list()
-                self._data_select_list = [f"{func}({left_script}, {right_script})"
+                self._data_select_list = [f"{func}({left_script},{right_script})"
                                           for left_script, right_script
                                           in zip(left_scripts, right_scripts)]
             else:
@@ -1170,6 +1254,13 @@ class BaseExpression(_InternalAccessor):
             obj._where_expr = expr._where_expr
         return obj
 
+    def __getattr__(self, key: str):
+        if key in self._data_columns:
+            return self[key]
+        else:
+            raise AttributeError(
+                f"'{self.__class__.__name__}' object has no attribute '{key}'")
+
     def __getitem__(self, key):
         # TODO: more checks
         if isinstance(key, BooleanExpression) and key._var_name == self._var_name:
@@ -1200,22 +1291,22 @@ class BaseExpression(_InternalAccessor):
     def _get_from_script(self, *args, **kwargs):
         from .series import Series
         from .frame import DataFrame
-        if self.is_index_like:
+        if self._is_index_like:
             return get_orca_obj_from_script(*args, **kwargs, as_index=self._is_index_like)
-        elif self.is_dataframe_like:
+        elif self._is_dataframe_like:
             return DataFrame._get_from_script(*args, **kwargs)
-        elif self.is_series_like:
+        elif self._is_series_like:
             return Series._get_from_script(*args, **kwargs)
 
     def _get_data_select_list(self):
         return self._data_select_list
 
     def get_select_list(self):
-        if self.is_dataframe_like:
+        if self._is_dataframe_like:
             select_list = (f"{script} as {column_name}"
                            for script, column_name
                            in zip(self._get_data_select_list(), self._data_columns))
-        elif self.is_series_like:
+        elif self._is_series_like:
             select_column = self._get_data_select_list()[0]
             select_list = [f"{select_column} as ORCA_EXPRESSION_COLUMN"]
         index_select_list = self._index_columns
@@ -1225,7 +1316,6 @@ class BaseExpression(_InternalAccessor):
         select_list = self.get_select_list()
         script = sql_select(select_list, self._var_name, self._where_expr,
                             orderby_list=orderby_list, asc=asc)
-        # print(script)    # TODO: debug info
         return script
 
     def _binary_op(self, *args, **kwargs):
@@ -1253,18 +1343,6 @@ class BaseExpression(_InternalAccessor):
     def name(self):
         return self._name
 
-    @property
-    def is_index_like(self):
-        return self._is_index_like
-
-    @property
-    def is_series_like(self):
-        return self._is_series_like
-
-    @property
-    def is_dataframe_like(self):
-        return self._is_dataframe_like
-
     def rename(self, *args, **kwargs):
         _raise_must_compute_error("Unable to rename an Expression")
 
@@ -1283,7 +1361,7 @@ class BaseExpression(_InternalAccessor):
         return ref.plot(*args, **kwargs)
 
 
-class ArithExpression(BaseExpression, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin,IOOpsMixin):
+class ArithExpression(BaseExpression, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, IOOpsMixin):
     """
     Subclass of BaseExpression dealing with arithmetic expressions.
     """
@@ -1291,10 +1369,10 @@ class ArithExpression(BaseExpression, ArithOpsMixin, LogicalOpsMixin, StatOpsMix
     pass
 
 
-class BooleanExpression(BaseExpression, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin,IOOpsMixin):
+class BooleanExpression(BaseExpression, ArithOpsMixin, LogicalOpsMixin, StatOpsMixin, IOOpsMixin):
     """
     Subclass of BaseExpression dealing with logical expressions.
     """
 
-    def to_where_list(self):
+    def _to_where_list(self):
         return self._data_select_list

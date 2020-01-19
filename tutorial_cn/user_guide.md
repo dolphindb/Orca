@@ -288,9 +288,13 @@ df_x_gt_0 = df.x > 0
 df[df_x_gt_0] = df[df_x_gt_0] + 1
 ```
 
-### 避免用numpy函数处理Orca对象
+### 避免用NumPy函数处理Orca对象
 
-pandas中经常用numpy函数处理一个DataFrame或Series，例如：
+用户应该避免用NumPy函数处理Orca对象。Orca的附属项目DolphinDB NumPy对这些操作有优化，详见[DolphinDB NumPy使用教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/dolphindb_numpy.md)。
+
+以下将解释为何直接使用NumPy函数或对象进行运算是不恰当的。
+
+pandas中经常用NumPy函数处理一个DataFrame或Series，例如：
 
 ```python
 >>> ps = pd.Series([1,2,3])
@@ -301,9 +305,9 @@ pandas中经常用numpy函数处理一个DataFrame或Series，例如：
 dtype: float64
 ```
 
-应该避免在Orca中使用这种写法。因为numpy函数不识别Orca对象，会将Orca对象当成一个一般的类似数组的对象，对它进行遍历计算。这样会带来大量不必要的网络开销，返回的类型也并非一个Orca对象。在某些情况下，还可能抛出难以理解的异常。用户应该避免调用numpy函数处理Orca对象。
+应该避免在Orca中使用这种写法。因为NumPy函数不识别Orca对象，会将Orca对象当成一个一般的类似数组的对象，对它进行遍历计算。这样会带来大量不必要的网络开销，返回的类型也并非一个Orca对象。在某些情况下，还可能抛出难以理解的异常。
 
-Orca对一些常用的计算函数，例如`log`, `exp`等进行了扩展。对于以上pandas脚本，最佳的Orca改写如下：
+Orca对一些常用的计算函数，例如`log`, `exp`等进行了扩展。对于以上pandas脚本，可用Orca改写如下：
 
 ```python
 >>> os = orca.Series([1,2,3])
@@ -327,26 +331,7 @@ Orca对一些常用的计算函数，例如`log`, `exp`等进行了扩展。对�
 dtype: float64
 ```
 
-#### 操作数的顺序
-
-Orca的DataFrame和Series支持与numpy的数值进行四则运算或比较运算，但是有一些限制：numpy的数值必须出现在运算符的右侧：
-
-```python
->>> p = np.exp(1)
->>> type(p)
-<class 'numpy.float64'>
-
->>> s = orca.Series([1,2,3])
->>> p * s         # Could cause potential problems!
->>> s * p         # correct expression
-
->>> p / s         # Could cause potential problems!
->>> 1 / s * p     # correct expression
-```
-
-这是因为，numpy的数值类型重写了四则运算方法。当numpy的数值出现在运算符左侧时，会调用numpy的运算方法。而numpy的实现没有对Orca对象进行特殊处理。这可能会造成潜在的问题。如果numpy的数值出现在运算符右侧，则调用的是Orca的运算方法，能正确识别numpy数值类型。
-
-如果操作数是Python的内置类型，就没有这个限制。
+总之，在遇到上述情况时，用[DolphinDB NumPy](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/dolphindb_numpy.md)代替NumPy，可以规避这些问题。
 
 ### 修改表数据的限制
 
@@ -367,7 +352,7 @@ Orca的DataFrame和Series支持与numpy的数值进行四则运算或比较运�
 - 更新的数据类型不兼容，例如将一个字符串赋值给一个整数列时，会抛出异常
 - 为一个表示非内存表的orca对象添加列，或修改其中的数据时，会将这个表复制为内存表中，并给出一个警告
 - 自动为一个表示分区表的orca对象添加默认索引时，并不会真正添加一个列，此时会给出一个警告
-- 为一个表示分区表的orca对象设置或添加一个列时，如果这个列是一个Python或numpy数组，或一个表示内存表的orca Series时，会抛出异常
+- 为一个表示分区表的orca对象设置或添加一个列时，如果这个列是一个Python或NumPy数组，或一个表示内存表的orca Series时，会抛出异常
 
 当尝试给表示非内存表的orca对象添加列，或修改其中数据时，数据会复制为内存表，然后再进行修改。当处理海量数据时，可能导致内存不足。因此应该尽量避免对这类orca对象的修改操作。
 

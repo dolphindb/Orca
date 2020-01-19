@@ -229,7 +229,10 @@ class _ConstantSP(object):
     def drop_columns(self, column_names):
         session, var_name = self._session, self.var_name
         column_names_literal = to_dolphindb_literal(column_names)
-        session.run(f"{var_name}.drop!({column_names_literal})")
+        script = f"{var_name}.drop!({column_names_literal})"
+        if _get_verbose():
+            print(script)
+        session.run(script)
         self._update_metadata()
 
     def attach_default_index(self):
@@ -248,6 +251,7 @@ class _ConstantSP(object):
             except RuntimeError as ex:
                 ex_msg = str(ex)
                 if (ex_msg.startswith("The table is not allowed to update")
+                        or ex_msg.startswith("<Server Exception> in run: The table is not allowed to update")
                         or ex_msg.startswith("<Server Exception> in run: The category")
                         or ex_msg.startswith("<Server Exception> in run: The data type")
                         or ex_msg.endswith("the table shouldn't be shared and the size of the new column must equal to the size of the table.")):
@@ -598,7 +602,7 @@ class _InternalFrame(object):
         return self.var.id
 
     @property
-    def _var_name(self):    # TODO: lazy initialization
+    def _var_name(self):    # TODO: lazyproperty
         return self.var.var_name
     
     @property

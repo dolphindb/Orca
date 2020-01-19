@@ -5,8 +5,9 @@
 - [建立数据库连接](#1-建立数据库连接)
 - [导入数据](#2-导入数据)
    - [`read_csv`函数](#21-read_csv函数)
-   - [`read_table`函数](#22-read_table)
-   - [`from_pandas`函数](#23-from_pandas)
+   - [`read_table`函数](#22-read_table函数)
+   - [`read_shared_table`函数](#23-read_shared_table函数)
+   - [`from_pandas`函数](#24-from_pandas函数)
 - [对其它格式文件的支持](#3-对其它格式文件的支持)
 
 ## 1 建立数据库连接
@@ -277,15 +278,61 @@ Orca提供`read_table`函数，通过该函数指定DolphinDB数据库和表名�
 
    分布式表同样可以通过`read_table`函数加载。例如，加载[2.1.3](#213-导入分布式表)小节中创建的分布式表：
 
-   ```Python
+   ```python
    >>> df = orca.read_table("dfs://demoDB", "quotes")
    ```
 
-### 2.3 `from_pandas`函数
+### 2.3 `read_shared_table`函数
+
+Orca提供`read_shared_table`函数，该函数可读取一个DolphinDB的共享表，返回一个Orca的DataFrame。通过这个函数，用户可以读取一张已经在DolphinDB中的内存表或流表。
+
+在DolphinDB中将表共享：
+
+```dolphindb
+t = table(1..3 as id, take(`a`b, 3) as sym)
+share t as sharedT
+```
+
+用Orca读取共享表：
+
+```python
+>>> df = orca.read_shared_table("sharedT")
+>>> df
+   id sym
+0   1   a
+1   2   b
+2   3   a
+```
+
+用`append`函数，并指定参数inplace=True，向其中插入数据：
+
+```
+>>> df.append(orca.DataFrame({"id": [4], "sym": ["b"]}), inplace=True)
+>>> df
+   id sym
+0   1   a
+1   2   b
+2   3   a
+3   4   b
+```
+
+在DolphinDB中访问共享表，观察到数据已经成功插入：
+
+```dolphindb
+> sharedT;
+id sym
+-- ---
+1  a
+2  b
+3  a
+4  b
+```
+
+### 2.4 `from_pandas`函数
 
 Orca提供`from_pandas`函数，该函数接受一个pandas的DataFrame作为参数，返回一个Orca的DataFrame，通过这个方式，Orca可以直接加载原先存放在pandas的DataFrame中的数据。
 
-```Python
+```python
 >>> import pandas as pd
 >>> import numpy as np
 

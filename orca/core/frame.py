@@ -26,7 +26,8 @@ from .utils import (
     _try_convert_iterable_to_list, _unsupport_columns_axis,
     check_key_existence, dolphindb_numeric_types, get_orca_obj_from_script,
     is_dolphindb_identifier, is_dolphindb_scalar, is_dolphindb_vector,
-    sql_select, to_dolphindb_literal, to_dolphindb_type_name)
+    sql_select, to_dolphindb_literal, to_dolphindb_type_name,
+    dolphindb_literal_types, dolphindb_temporal_types, _get_python_object_dtype)
 
 
 class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
@@ -73,7 +74,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 data = pd.DataFrame(data=data, index=pd_index,    # TODO: write your own Series parsing function
                                     columns=pd_columns, dtype=dtype, copy=False)    # TODO: copy = True or False ?
                 odf = _InternalFrame.from_pandas(session, data)
-                if pd_index is None and isinstance(index, Index):
+                if isinstance(index, Index):
                     odf.attach_index(index)
             _Frame.__init__(self, odf, session)
         self._name = None
@@ -142,7 +143,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
             return object.__setattr__(self, name, value)
         except AttributeError:
             pass
-        
+
         if name in self._internal_names_set:
             object.__setattr__(self, name, value)
         else:
@@ -357,7 +358,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
             raise ValueError("Frame has no default index if it is not in memory")
         session = self._session
         self_var_name, other_var_name = self._var_name, other._var_name
-        if other.is_dataframe_like:
+        if other._is_dataframe_like:
             self_data_columns = self._data_columns
             other_data_columns = other._data_columns
             index_list, from_clause = _generate_joiner(
@@ -374,8 +375,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 data_columns = [s if o is None else o for s, o in merged_columns]
             select_list = itertools.chain(index_list, select_list)
             script = sql_select(select_list, from_clause)
-            # print(script)    # TODO: debug info
-        elif other.is_series_like:
+        elif other._is_series_like:
             self_data_columns = self._data_columns
             other_data_column = other._data_columns[0]
             index_list, from_clause = _generate_joiner(
@@ -385,7 +385,6 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
             data_columns = self_data_columns
             select_list = itertools.chain(index_list, select_list)
             script = sql_select(select_list, from_clause)
-            # print(script)    # TODO: debug info
         return self._get_from_script(
             session, script, data_columns=data_columns, index_map=self._index_map, index=self._index)
 
@@ -401,28 +400,22 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
 
     # Reshaping / sorting / transposing
 
-    def melt(self, id_vars=None, value_vars=None, var_name=None, value_name='value', col_level=None):
-        if col_level is not None:
-            raise NotImplementedError()
-
     def explode(self, column):
         warnings.warn("orca columns cannot be list-like. explode will not work", MixedTypeWarning)
         return self
 
     # Combining / joining / merging
 
-    def join(self, other, on=None, how="left", lsuffix="", rsuffix="", sort=False):
+    def join(self, other, on=None, how="left", lsuffix="", rsuffix="", sort=False, lazy=False):
         return merge(self, other, how=how, left_on=on, left_index=(not on),
-                     right_index=True, suffixes=(lsuffix, rsuffix), sort=sort)
+                     right_index=True, suffixes=(lsuffix, rsuffix), sort=sort, lazy=lazy)
 
     def merge(self, right, how='inner', on=None, left_on=None, right_on=None,
               left_index=False, right_index=False, sort=False, suffixes=('_x', '_y'),
-              copy=True, indicator=False, validate=None,
-              by=None, left_by=None, right_by=None):
+              copy=True, indicator=False, validate=None, lazy=False):
         return merge(self, right, how=how, on=on, left_on=left_on, right_on=right_on,
                      left_index=left_index, right_index=right_index, sort=sort,
-                     suffixes=suffixes, copy=copy, indicator=indicator, validate=validate,
-                     by=by, left_by=left_by, right_by=right_by)
+                     suffixes=suffixes, copy=copy, indicator=indicator, validate=validate, lazy=lazy)
 
     def merge_window(self, right, window_lower, window_upper, prevailing=False, on=None,
                      left_on=None, right_on=None, left_index=False, right_index=False):
@@ -696,21 +689,6 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
             self._update_metadata()
             return
 
-    def droplevel(self, level, axis=0):
-        session = self._session
-        if is_dolphindb_scalar(level):
-            level = (level,)
-        else:
-            level = _try_convert_iterable_to_list(level)
-
-        _unsupport_columns_axis(self, axis)
-
-        _, _, _, level_idx = _infer_level(level, self._index_map)
-        index_map = [m for i, m in enumerate(self._index_map) if i not in level_idx]
-        new_odf = _InternalFrame(session, self._var, index_map, self._data_columns,
-                                 self._column_index, self._column_index_names)
-        return DataFrame._with_where_expr(self._where_expr, new_odf)
-
     def stack(self, level=-1, dropna=True):
         if self._column_index_level != 1:
             raise ValueError("column level must be 1")
@@ -726,12 +704,98 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         new_names = to_dolphindb_literal([new_index, ORCA_COLUMN_NAME_FORMAT(0)])
         script = f"unpivot({self._var_name},{key_col_names},{value_col_names})" \
                  f".rename!(`valueType`value, {new_names})"
-        index_map = self._index_map + [(new_index, None)]
+        if self._column_index_names is not None:
+            value_column_name = self._column_index_names[0]
+        else:
+            value_column_name = None
+        index_map = self._index_map + [(new_index, (value_column_name,))]
         res = get_orca_obj_from_script(self._session, script, index_map, squeeze=True, squeeze_axis=1)
         if dropna:
             return res.dropna(how='all')
         else:
             return res
+
+    def melt(self, id_vars=None, value_vars=None, var_name=None, value_name='value', col_level=None):
+        if self._column_index_level != 1 and col_level is not None:
+            raise NotImplementedError()
+        if id_vars is None:
+            id_vars = []
+            key_col_names = ""
+        else:
+            check_key_existence(id_vars, self._data_columns)
+            key_col_names = to_dolphindb_literal(id_vars)
+        if value_vars is None:
+            value_vars = [k for k in self._data_columns if k not in id_vars]
+        else:
+            check_key_existence(value_vars, self._data_columns)
+        for col in value_vars:
+            if self._ddb_dtypes[col] not in dolphindb_numeric_types:
+                raise TypeError("The value column to melt must be numeric type")
+        value_col_names = to_dolphindb_literal(value_vars)
+        if var_name is None:
+            var_name = "variable"
+        elif var_name is not None:
+            if not isinstance(var_name, str):
+                raise TypeError("var_name must be a string")
+        if value_name is None:
+            value_name = "value"
+        elif value_name is not None:
+            if not isinstance(value_name, str):
+                raise TypeError("value_name must be a string")
+        new_names = to_dolphindb_literal([var_name, value_name])
+        script = f"unpivot({self._var_name},{key_col_names},{value_col_names})" \
+                 f".rename!(`valueType`value, {new_names})"
+
+        res = get_orca_obj_from_script(self._session, script, None, squeeze=True, squeeze_axis=1)
+        return res
+
+    def pivot(self, index=None, columns=None, values=None):
+        if index is None:
+            raise ValueError("index cannot be empty in Orca's pivot_table")
+        if columns is None:
+            raise ValueError("columns cannot be empty in Orca's pivot_table")
+
+        def get_column_key_and_script(column):
+            ext_err = "Unable to pivot with an external Series"
+            if isinstance(column, str):
+                check_key_existence(column, self._data_columns)
+                key = script = column
+            elif isinstance(column, Series):
+                if column._var_name != self._var_name:
+                    raise ValueError(ext_err)
+                key = script = column._data_columns[0]
+            elif isinstance(column, Index):
+                if column._var_name != self._var_name:
+                    raise ValueError(ext_err)
+                if isinstance(column, MultiIndex):
+                    raise ValueError("Unable to pivot with MultiIndex")
+                key = script = column._index_columns[0]
+            elif isinstance(column, (ArithExpression, BooleanExpression)):
+                if not column._is_series_like:
+                    raise ValueError("Grouper is not 1-dimensional")
+                if column._var_name != self._var_name:
+                    raise ValueError(ext_err)
+                key = column._data_columns[0]
+                script = column._get_data_select_list()[0]
+            else:
+                raise KeyError(column)
+            return key, script
+
+        if values is not None:
+            if not isinstance(values, str):
+                raise TypeError("values must be a string")
+            check_key_existence(values, self._data_columns)
+            select_list = [f"{values}"]
+        else:  # DolphinDB extension
+            select_list = []
+        index_key, index_script = get_column_key_and_script(index)
+        columns_key, columns_script = get_column_key_and_script(columns)
+        pivot_list = [f"{index_script} as {index_key}",
+                      f"{columns_script} as {columns_key}"]
+
+        script = sql_select(select_list, self._var_name, self._where_expr,
+                            pivot_list=pivot_list)
+        return get_orca_obj_from_script(self._session, script, [index_key], column_index_names=[columns_key])
 
     def pivot_table(self, values=None, index=None, columns=None, aggfunc='mean', fill_value=None, margins=False, dropna=True, margins_name='All', observed=False):
         if index is None:
@@ -757,7 +821,7 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                     raise ValueError("Unable to pivot with MultiIndex")
                 key = script = column._index_columns[0]
             elif isinstance(column, (ArithExpression, BooleanExpression)):
-                if not column.is_series_like:
+                if not column._is_series_like:
                     raise ValueError("Grouper is not 1-dimensional")
                 if column._var_name != self._var_name:
                     raise ValueError(ext_err)
@@ -782,10 +846,6 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         script = sql_select(select_list, self._var_name, self._where_expr,
                             pivot_list=pivot_list)
         return get_orca_obj_from_script(self._session, script, [index_key], column_index_names=[columns_key])
-
-
-    # def pivot(self, index=None, columns=None, values=None):
-    #     script = sql_select()
 
     def transpose(self, copy=True, *args, **kwargs):
         # TODO: support MultiIndex
@@ -881,7 +941,6 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
         )
         select_list = itertools.chain(self._index_columns, self._data_columns)
         script = sql_select(select_list, var_name, where_list)
-        # print(script)    # TODO: debug info
         res = self._get_from_script(self._session, script, self)
         if drop_level:
             return res.droplevel(range(len(key)))
@@ -1108,3 +1167,237 @@ class DataFrame(DataFrameLike, _Frame, IOOpsMixin):
                 if not (col_dtypes[i] in exclude):
                     vlist.append(data_columns[i])
         return df.loc[:,vlist]
+
+    def set_axis(self, labels, axis=0, inplace=None):
+        axis = _infer_axis(self, axis)
+        mapper = dict()
+        if axis == 0:
+            if len(self.index.values) != len(labels):
+                raise ValueError(f" Length mismatch: Expected axis has {len(self.index.values)} elements, new values have {len(labels)} elements")
+            for idx, new_idx in zip(self.index.values, labels):
+                mapper[idx] = new_idx
+            raise NotImplementedError()  # TODO: support more args; implement set_axis index
+        elif axis == 1:
+            if len(self.columns.values) != len(labels):
+                raise ValueError(f" Length mismatch: Expected axis has {len(self.columns.values)} elements, new values have {len(labels)} elements")
+            for col, new_col in zip(self.columns.values, labels):
+                mapper[col] = new_col
+            column_index_level = self._column_index_level
+            if not inplace:
+                odf = self._internal.copy_as_in_memory_table()
+                odf.rename(columns=mapper, level=None)
+                return self._with_where_expr(self._where_expr, odf, session=self._session)
+            else:
+                self._internal.rename(columns=mapper, level=None)
+        elif axis not in [0, 1]:
+            raise ValueError('axis must be either 0 or 1')
+
+    def rename_axis(self, mapper=None, index=None, columns=None, axis=0, copy=True, inplace=False):
+        if inplace and self._segmented:
+            raise ValueError("A segmented table is not allowed to be rename axis inplace")
+        axis = _infer_axis(None, axis)
+        if axis == 0:
+            if mapper is not None:
+                index = mapper
+        elif axis == 1:
+            if mapper is not None:
+                columns = mapper
+        else:
+            raise ValueError(f"No axis named {axis} for object type {type(self)}")
+        if index == str.upper:
+            index = str.upper(self._internal.index_name)
+        elif index == str.lower:
+            index = str.lower(self._internal.index_name)
+        if columns == str.upper:
+            columns = str.upper(self.columns.name)
+        elif columns == str.lower:
+            columns = str.lower(self.columns.name)
+        if index is not None:    # TODO: support more args; implement rename axis index
+            if isinstance(index, dict):
+                raise NotImplementedError()
+            else:
+                if isinstance(index, str) or isinstance(index, int) or isinstance(index, float) or isinstance(index, bool) or index is None:
+                    index = [index]
+                if len(index) != 1:
+                    raise ValueError(f"Length of new names must be 1, got {len(index)}")
+                if not inplace:
+                    odf = self._internal.copy_as_in_memory_table()
+                    new_df = self._with_where_expr(self._where_expr, odf, session=self._session)
+                    new_df.rename_axis(index[0],axis=0,inplace=True)
+                    return new_df
+                else:
+                    index_map = [i for i in self._index_map]
+                    index_map.remove(index_map[0])
+                    tup = (self._index_map[0][0], (index[0],))
+                    index_map.insert(0, tup)
+                    new_odf = _InternalFrame(self._session, self._var, index_map=index_map)
+                    self._internal = new_odf
+                    self._index = Index._from_internal(new_odf)
+                    self._update_metadata()
+        if columns is not None:
+            if isinstance(columns, dict):
+                if not inplace:
+                    odf = self._internal.copy_as_in_memory_table()
+                    odf.rename(columns=columns, level=None)
+                    return self._with_where_expr(self._where_expr, odf, session=self._session)
+                else:
+                    self._internal.rename(columns=columns, level=None)
+                    self._update_metadata()
+            else:
+                if isinstance(columns, str) or isinstance(columns, int) or isinstance(columns, float) \
+                        or isinstance(columns, bool) or columns is None:
+                    columns = [columns]
+                if len(columns) != 1:
+                    raise ValueError(f"Length of new names must be 1, got {len(columns)}")
+                if not inplace:
+                    odf = self._internal.copy_as_in_memory_table()
+                    new_df = self._with_where_expr(self._where_expr, odf, session=self._session)
+                    new_df.rename_axis(columns[0], axis =1, inplace=True)
+                    return new_df
+                else:
+                    col = self.columns
+                    col.name = columns[0]
+                    self._internal.set_columns(columns=col)
+
+    def describe(self,  percentiles=None, include=None, exclude=None):
+        df = self
+        col_list = []
+        data_columns = df._data_columns
+        #dtype_list = dt
+        if include is None and exclude is None:
+            col_list = [x for x in data_columns if df[x]._ddb_dtype in dolphindb_numeric_types]
+            #col_list = [data_columns[i] for i in range(0, len(data_columns)) if (df[data_columns[i]]._ddb_dtype in dolphindb_numeric_types)]
+        elif include == 'all':
+            col_list = data_columns
+        #elif include is None:
+        #    col_list = [data_columns[i] for i in range(0, len(data_columns)) if
+        #                (df[data_columns[i]]._ddb_dtype not in exclude)]
+        else:
+            clude = include or exclude
+            tlist = []
+            if not isinstance(clude, list):
+                clude = [clude]
+
+            if np.number in clude or 'number' in clude:
+                tlist = tlist + [x for x in data_columns if df[x]._ddb_dtype in dolphindb_numeric_types]
+            if 'O' in clude or np.object in clude or 'object' in clude:
+                tlist = tlist  + [x for x in data_columns if df[x]._ddb_dtype in dolphindb_literal_types]
+            if 'datetime64' in clude or 'datetime' in clude or np.datetime64 in clude:
+                tlist = tlist + [x for x in data_columns if df[x]._ddb_dtype in dolphindb_temporal_types]
+            # TODO: time types
+            tlist = tlist + [x for x in data_columns if df[x].dtype in clude]
+
+            if exclude is None:
+                col_list = [x for x in data_columns if x in tlist]
+            else:
+                col_list = [x for x in data_columns if x not in tlist]
+        session = self._session
+        series_list = []
+        for i in col_list:
+            s = df[i]
+            series_list = series_list + [s.describe(percentiles)]
+
+        #     series_list = series_list + [pd.Series(data=data_list, index=index_list)]
+
+        d = pd.concat([x for x in series_list], axis=1, sort=False)
+        d.columns = col_list
+        return d
+
+    def add_prefix(self, prefix):
+        df = self
+        data_columns = [str(x[0]) for x in df._column_index]
+        coln_list = [prefix + i for i in data_columns]
+        ture_name = []
+        for i in range(0, len(coln_list)):
+            var_name = coln_list[i]
+            is_id = (isinstance(var_name, str)
+             and not var_name.startswith("_")
+             and var_name.isidentifier())
+            if is_id:
+                ture_name.append(coln_list[i])
+            else:
+                ture_name.append(ORCA_COLUMN_NAME_FORMAT(i))
+        internal = _InternalFrame(self._session, self._var, data_columns=self._data_columns, column_index=self._column_index)
+        internal.set_columns(coln_list)
+        return DataFrame(internal, session=self._session)
+
+
+    def add_suffix(self, suffix):
+        df = self
+        data_columns = [str(x[0]) for x in df._column_index]
+        coln_list = [i+suffix for i in data_columns]
+        ture_name = []
+        for i in range(0, len(coln_list)):
+            var_name = coln_list[i]
+            is_id = (isinstance(var_name, str)
+             and not var_name.startswith("_")
+             and var_name.isidentifier())
+            if is_id:
+                ture_name.append(coln_list[i])
+            else:
+                ture_name.append(ORCA_COLUMN_NAME_FORMAT(i))
+        internal = _InternalFrame(self._session, self._var, data_columns=self._data_columns, column_index=self._column_index)
+        internal.set_columns(coln_list)
+        return DataFrame(internal, session=self._session)
+
+    def replace(self, to_replace=None, value=None, inplace=False, limit=None, regex=False, method='pad'):
+        if inplace:
+            replaced = self.replace(value=value, to_replace=to_replace, inplace=False, limit=limit, regex=regex, method=method)
+            self[self._data_columns] = replaced
+            return
+        if regex:
+            raise NotImplementedError()
+        df = self
+        session = self._session
+        data_columns = self._data_columns
+        select_script = []
+        if (value is None) and (isinstance(to_replace, list) or isinstance(to_replace, tuple) or is_dolphindb_scalar(to_replace)):
+            if isinstance(to_replace, tuple):
+                to_replace = list(to_replace)
+            elif is_dolphindb_scalar(to_replace):
+                to_replace = [to_replace]
+            #ref = _ConstantSP.upload_obj(session, to_replace)
+            if method == 'pad':
+                method = 'ffill'
+            for col in data_columns:
+                same_type_list = [x for x in to_replace if _get_python_object_dtype(x) == df[col].dtype]
+                if len(same_type_list) > 0:
+                    select_script.append(f"iif({col} in {to_dolphindb_literal(same_type_list)}, {self._ddb_dtypestr[col]}(NULL), {col}).{method}() as {col}")
+                else:
+                    select_script.append(f"{col}")
+
+            #select_script = [f"iif({col} in {ref.var_name}, {self._ddb_dtypestr[col]}(NULL), {col}).{method}() as {col}" for col in data_columns]
+
+        elif is_dolphindb_scalar(to_replace) and is_dolphindb_scalar(value):
+            for col in data_columns:
+                if df[col].dtype == _get_python_object_dtype(to_replace):
+                    select_script.append(f"iif({col}=={to_dolphindb_literal(to_replace)}, {to_dolphindb_literal(value)}, {col}) as {col}")
+                else:
+                    select_script.append(f"{col}")
+            #select_script = [f"iif({col}=={to_dolphindb_literal(to_replace)}, {to_dolphindb_literal(value)}, {col}) as {col}" for col in data_columns]
+
+        elif isinstance(to_replace, list) and isinstance(value, list):
+            raise NotImplementedError("value can not be list now ")       # TODO :  value is list
+        elif isinstance(to_replace, list) and is_dolphindb_scalar(value):
+            #ref = _ConstantSP.upload_obj(session, to_replace)
+            #select_script = [f"iif({col} in {ref.var_name}, {to_dolphindb_literal(value)}, {col}) as {col}" for col in data_columns]
+            for col in data_columns:
+                same_type_list = [x for x in to_replace if _get_python_object_dtype(x) == df[col].dtype]
+                if len(same_type_list) > 0:
+                    select_script.append(f"iif({col} in {to_dolphindb_literal(same_type_list)}, {to_dolphindb_literal(value)}, {col}) as {col}")
+                else:
+                    select_script.append(f"{col}")
+                #select_script = [f"iif({col} in {}, {to_dolphindb_literal(value)}, {col}) as {col}" for col in data_columns]
+
+        elif isinstance(to_replace, dict) and value is None:
+            raise NotImplementedError()                         # TODO :  key-value is more than one
+        elif isinstance(to_replace, dict) and is_dolphindb_scalar(value):
+            for col in data_columns:
+                if col in to_replace.keys() and df[col].dtype == _get_python_object_dtype(to_replace[col]):
+                    select_script.append(f"iif({col}=={to_dolphindb_literal(to_replace[col])}, {value}, {col}) as {col}")
+                else:
+                    select_script.append(f"{col}")
+
+        select_script = itertools.chain(self._index_columns, select_script)
+        script = sql_select(select_script, self._var_name)
+        return self._get_from_script(session, script)

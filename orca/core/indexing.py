@@ -62,7 +62,7 @@ class _LocIndexer(object):
         df = self._df
         old_data_columns = df._data_columns
 
-        if df.is_series_like and cols_sel is not None:
+        if df._is_series_like and cols_sel is not None:
             raise IndexError("Too many indexers")
 
         if cols_sel is None:
@@ -245,7 +245,6 @@ class _LocIndexer(object):
             script = f"{var_name}[{rows_cond}]"
             # script = var_name if rows_cond is None else f"select {var.var_name}, {rows_cond} from "
 
-        # print(script)    # TODO: debug info
         return ref._get_from_script(session, script, ref, squeeze=squeeze, squeeze_axis=None)
 
     def __setitem__(self, key, value):
@@ -264,19 +263,19 @@ class _LocIndexer(object):
         cols_cond = self._get_data_columns(cols_sel)
         cols_cond = df._data_columns if cols_cond is None else cols_cond
 
-        if isinstance(rows_sel, BooleanExpression):
-            if (isinstance(value, (Series, DataFrame, ArithExpression,
-                                   BooleanExpression, ContextByExpression))
-                    and rows_sel._var_name == value._var_name
-                    and rows_sel is value._where_expr):
-                column_names = _try_convert_iterable_to_list(cols_cond)
-                new_values = value._get_data_select_list()
-                if isinstance(value, ContextByExpression):
-                    contextby_list = value._get_contextby_list()
-                else:
-                    contextby_list = None
-                return var._sql_update(column_names, new_values, where_expr=rows_sel,
-                                        contextby_list=contextby_list)
+        if (isinstance(rows_sel, BooleanExpression)
+                and isinstance(value, (Series, DataFrame, ArithExpression,
+                                       BooleanExpression, ContextByExpression))
+                and rows_sel._var_name == value._var_name
+                and (rows_sel is value._where_expr or value._where_expr is None)):
+            column_names = _try_convert_iterable_to_list(cols_cond)
+            new_values = value._get_data_select_list()
+            if isinstance(value, ContextByExpression):
+                contextby_list = value._get_contextby_list()
+            else:
+                contextby_list = None
+            return var._sql_update(column_names, new_values, where_expr=rows_sel,
+                                    contextby_list=contextby_list)
 
         from_clause = None
         lencols = len(cols_cond)
@@ -425,7 +424,7 @@ class _iLocIndexer(object):
         df = self._df
         old_data_columns = df._data_columns
 
-        if df.is_series_like and cols_sel is not None:
+        if df._is_series_like and cols_sel is not None:
             raise IndexError("Too many indexers")
 
         if cols_sel is None:
@@ -495,7 +494,7 @@ class _iLocIndexer(object):
             rows_cond = f"[{rows_sel}]"
         elif is_dolphindb_vector(rows_sel):
             len_self = len(self._df)
-            rows_sel = [self._check_negative_index(idx, len_self) for idx in rows_sel]
+            rows_sel = np.array([self._check_negative_index(idx, len_self) for idx in rows_sel])
             var = _ConstantSP.upload_obj(ref._session, rows_sel)
             if var.type not in (ddb.settings.DT_BYTE,
                                 ddb.settings.DT_SHORT,
@@ -577,7 +576,7 @@ class _iLocIndexer(object):
         squeeze = is_dolphindb_integral(rows_sel)
 
         script = f"{ref._var_name}[{rows_cond}]"
-        name = ref.name if ref.is_series_like else None
+        name = ref.name if ref._is_series_like else None
         return ref._get_from_script(session, script, ref, name=name, squeeze=squeeze, squeeze_axis=0)
 
     def __setitem__(self, key, value):
@@ -714,7 +713,6 @@ class _iLocIndexer(object):
         elif is_dolphindb_scalar(rows_sel):
             rows_cond = f"rowNo({var_name}.{index_column}) = {to_dolphindb_literal(rows_sel)}"
             # rows_cond = f"{index_column} = {to_dolphindb_literal(rows_sel)}"
-            # print(rows_cond)
         elif is_dolphindb_vector(rows_sel):
             var = _ConstantSP.upload_obj(session, rows_sel)
             if var.type == ddb.settings.DT_BOOL:

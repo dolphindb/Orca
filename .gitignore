@@ -6,14 +6,17 @@ build
 
 tests/benchmark/originalCases/setup/settings.py
 tests/benchmark/testPerformance/setup/settings.py
-tests/demo_testing/setup/settings.py
 tests/unit_testing/setup/settings.py
+tests/demo_testing/setup/settings.py
+tests/orca_unit_testing/setup/settings.py
+tests/numpy_unit_testing/setup/settings.py
 
 /tests/benchmark/originalCases/setup/data/allTypes_performance.csv
 /tests/benchmark/originalCases/setup/data/onlyNumerical_performance.csv
 /tests/benchmark/originalCases/setup/data/USPrices.csv
 
-/tests/reports/unit_report.txt
+/tests/reports/numpy_unit_report.txt
+/tests/reports/orca_unit_report.txt
 /tests/benchmark/testPerformance/setup/data/ticker_10000000.csv
 /tests/benchmark/testPerformance/setup/data/value_10000000.csv
 /tests/benchmark/testPerformance/setup/data/ticker_1000000.csv

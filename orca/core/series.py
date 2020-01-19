@@ -9,10 +9,11 @@ from .indexes import Index, IndexOpsMixin
 from .indexing import _iLocIndexer, _LocIndexer
 from .internal import _ConstantSP, _InternalFrame
 from .operator import BooleanExpression, IOOpsMixin, SeriesLike
-from .utils import (ORCA_COLUMN_NAME_FORMAT,
+from .utils import (ORCA_COLUMN_NAME_FORMAT, _infer_axis,
                     _to_numpy_dtype, dolphindb_literal_types,
                     dolphindb_numeric_types, dolphindb_temporal_types,
-                    is_datetimelike, is_dolphindb_identifier, sql_select)
+                    is_datetimelike, is_dolphindb_identifier, sql_select,
+                    to_dolphindb_literal)
 
 
 class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
@@ -184,7 +185,6 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
             select_list = [column_name]
             where_expr = [f"isDuplicated({column_name})=false"]
             script = sql_select(select_list, self._var_name, where_expr, is_exec=True)
-            # print(script)    # TODO: debug info
         return self._session.run(script)
 
     def nunique(self, dropna=False):
@@ -197,7 +197,6 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
             column_name = self._data_columns[0]
             select_list = [f"nunique({column_name})"]
             script = sql_select(select_list, self._var_name, is_exec=True)
-            # print(script)    # TODO: debug info
         return self._session.run(script)
 
     def value_counts(self, normalize=False, sort=True, ascending=False, bins=None, dropna=True):
@@ -333,13 +332,13 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
                 if .5 not in percentiles:
                     percentiles.append(.5)
                 percentiles.sort()
-            ref = _ConstantSP.upload_obj(session, percentiles)
+            #ref = _ConstantSP.upload_obj(session, percentiles)
             for i in percentiles:
                 index_list.append(str(i*100)[:2] + '%')
-            data_list.extend(session.run(f"quantileSeries({self._var_name}.{self._data_columns[0]}, {ref.var_name})"))
+            #data_list.extend(session.run(f"quantile({self._var_name}.{self._data_columns[0]}, {to_dolphindb_literal(percentiles)})"))
+            data_list.extend(s.quantile(percentiles))
             index_list.append("max")
             data_list.append(s.max())
-            #print("data_list= ",data_list)
         elif s._ddb_dtype in dolphindb_literal_types:
             index_list = ['count', 'unique', 'top', 'freq']
             data_list = [s.count(), len(s.unique())]
@@ -356,3 +355,66 @@ class Series(SeriesLike, _Frame, IndexOpsMixin, IOOpsMixin):
             data_list.append(s.last())
 
         return pd.Series(data=data_list, index=index_list)
+
+    def set_axis(self, labels, axis=0, inplace=None):
+        axis = _infer_axis(self, axis)
+        new_index = dict()
+        if axis == 0:
+            if len(self.index.values) != len(labels):
+                raise ValueError(f" Length mismatch: Expected axis has {len(self.index.values)} elements, new values have {len(labels)} elements")
+            for idx, new_idx in zip(self.index.values, labels):
+                new_index[idx] = new_idx
+        elif axis not in [0, 1]:
+            raise ValueError('axis must be either 0 or 1')
+        if not inplace:
+            odf = self._internal.copy_as_in_memory_table()
+            return self._with_where_expr(self._where_expr, odf, name=new_index)
+        else:
+            self._name = new_index
+
+    def rename_axis(self, mapper=None, index=None, axis=0, copy=True, inplace=False):
+        axis = _infer_axis(self, axis)
+        if axis == 0:
+            if mapper is not None:
+                index = mapper
+        elif axis not in [0, 1]:
+            raise ValueError('axis must be either 0 or 1')
+        if index == str.upper:
+            index = str.upper(self._internal.index_name)
+        elif index == str.lower:
+            index = str.lower(self._internal.index_name)
+        if index is not None:    # TODO: support more args; implement rename index
+            if isinstance(index, dict):
+                if not is_dolphindb_identifier(index):
+                    column_name = ORCA_COLUMN_NAME_FORMAT(0)
+                else:
+                    column_name = index
+                if not isinstance(column_name, str):
+                    raise NotImplementedError()
+                data_column = self._data_columns[0]
+                columns = {data_column: column_name}
+                if not inplace:  # TODO: copy?
+                    odf = self._internal.copy_as_in_memory_table()
+                    odf.rename(columns=columns, level=None)
+                    return self._with_where_expr(self._where_expr, odf, name=index)
+                else:
+                    self._internal.rename(columns=columns, level=None)
+                    self._name = index
+            else:
+                if isinstance(index, str) or isinstance(index, int) or isinstance(index, float) or isinstance(index, bool) or index is None:
+                    index = [index]
+                if len(index) != 1:
+                    raise ValueError(f"Length of new names must be 1, got {len(index)}")
+                if not inplace:
+                    os = self._internal.copy_as_in_memory_table()
+                    new_os = self._with_where_expr(self._where_expr, os, session=self._session)
+                    new_os.rename_axis(index[0], inplace=True)
+                    return new_os
+                else:
+                    index_map = [i for i in self._index_map]
+                    index_map.remove(index_map[0])
+                    tup = (self._index_map[0][0], (index[0],))
+                    index_map.insert(0, tup)
+                    new_os = _InternalFrame(self._session, self._var, index_map=index_map)
+                    self._internal = new_os
+                    self._index = Index._from_internal(new_os)

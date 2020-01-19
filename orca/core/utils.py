@@ -1,16 +1,16 @@
 # coding=utf-8
+import datetime
 import itertools
 import json
-from typing import Iterable, List, Tuple, Optional, Union
-import string
 import random
-
-from pandas.tseries.frequencies import to_offset
-import pandas as pd
-import numpy as np
+import string
+from typing import Iterable, List, Optional, Tuple, Union
 
 import dolphindb as ddb
 import dolphindb.settings as types
+import numpy as np
+import pandas as pd
+from pandas.tseries.frequencies import to_offset
 
 from .common import _warn_not_dolphindb_identifier
 
@@ -170,22 +170,27 @@ def _get_where_list(key):
         If the key is neither a BooleanExpression nor a tuple.
     """
     from .operator import BooleanExpression
+    from .merge import BooleanMergeExpression
     if key is None:    # trivial case
         return None
     elif isinstance(key, BooleanExpression):
-        return key.to_where_list()
+        return key._to_where_list()
     elif isinstance(key, tuple):
-        assert all(isinstance(k, BooleanExpression) for k in key)
-        return sum((k.to_where_list() for k in key), [])
+        assert (all(isinstance(k, BooleanExpression) for k in key)
+                or all(isinstance(k, BooleanMergeExpression) for k in key))
+        return sum((k._to_where_list() for k in key), [])
     elif isinstance(key, Iterable):
         key = _try_convert_iterable_to_list(key)
         assert all(isinstance(k, str) for k in key)
         return key
+    elif isinstance(key, BooleanMergeExpression):
+        return key._to_where_list()
     else:
         raise TypeError('Unable to deduce where clause')
 
 def _merge_where_expr(where_expr1, where_expr2):
     from .operator import BooleanExpression
+    from .merge import BooleanMergeExpression
     def is_string_like(where_expr):
         return (isinstance(where_expr, str)
                 or (not isinstance(where_expr, (tuple, BooleanExpression))
@@ -197,7 +202,8 @@ def _merge_where_expr(where_expr1, where_expr2):
         return where_expr1 + where_expr2
 
     def to_tuple(where_expr):
-        assert where_expr is None or isinstance(where_expr, (tuple, BooleanExpression))
+        assert (where_expr is None
+                or isinstance(where_expr, (tuple, BooleanExpression, BooleanMergeExpression)))
         if where_expr is None:
             return ()
         elif isinstance(where_expr, tuple):
@@ -226,7 +232,7 @@ def _infer_axis(obj, axis):
             axis = 0
         else:
             raise ValueError(f"No axis named {axis}")
-    elif obj.is_dataframe_like:
+    elif obj._is_dataframe_like:
         # DEFAULT_AXIS = 1
         if axis == "columns" or axis == 1:
             axis = 1
@@ -235,7 +241,7 @@ def _infer_axis(obj, axis):
         else:
             # axis = DEFAULT_AXIS
             raise ValueError(f"No axis named {axis}")
-    elif obj.is_series_like:
+    elif obj._is_series_like:
         # DEFAULT_AXIS = 0
         if axis == "index" or axis == 0 or axis is None:
             axis = 0
@@ -550,6 +556,14 @@ _TYPE_TO_NUMPY_TYPE = {
 }
 
 
+def _get_python_object_dtype(value):
+    t = np.dtype(type(value))
+    if t != np.dtype('<U'):
+        return t
+    else:
+        return np.dtype('O')
+
+
 def _to_numpy_dtype(ddb_dtype):
     np_dtype = _TYPE_TO_NUMPY_TYPE.get(ddb_dtype, None)
     if np_dtype is None:
@@ -602,16 +616,22 @@ def is_dolphindb_scalar(obj):
 
 
 def is_dolphindb_vector(obj):
+    from dolphindb_numpy import ndarray
     return (isinstance(obj, (list, tuple)) or
-            isinstance(obj, np.ndarray) and obj.ndim == 1)
+            isinstance(obj, (ndarray, np.ndarray)) and obj.ndim == 1)
 
 
 def is_dolphindb_integral(obj):
     return isinstance(obj, (int, np.signedinteger))
 
 
+def is_dolphindb_floating(obj):
+    return isinstance(obj, (float, np.float32, np.float64))
+
+
 def is_dolphindb_uploadable(obj):
-    return isinstance(obj, (bool, int, float, str, list, dict, set, np.ndarray, np.number, pd.DataFrame))    # TODO: np.generic ?
+    return isinstance(obj, (bool, int, float, str, list, dict, set,
+                            np.ndarray, np.number, pd.DataFrame))
 
 
 def is_dolphindb_identifier(var_name):
@@ -634,6 +654,17 @@ def to_dolphindb_literal(obj):
     else:
         return str(obj)
 
+def _get_time_str(time):
+    if isinstance(time, str):
+        if len(time) == 4:
+            timestr = f"0{time}"
+        else:
+            timestr = time
+    elif isinstance(time, datetime.time):
+        timestr = time.strftime('%H:%M')
+    else:
+        raise TypeError("datetime.time or str")
+    return timestr
 
 def _infer_level(level, index_map):
     """

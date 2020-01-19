@@ -253,7 +253,6 @@ def read_csv(path, sep=',', delimiter=None, names=None,  index_col=None,
     elif engine != 'dolphindb':
         raise ValueError("The engine just support 'python', 'c', 'dolphindb'. Please check the engine type")
 
-    #print(path)
     path_var = _ConstantSP.upload_obj(session, path)
     path_name = path_var.var_name
     # support param sep and delimiter
@@ -322,9 +321,7 @@ def read_csv(path, sep=',', delimiter=None, names=None,  index_col=None,
     else:
         script = f"loadText({path_name}, '{delimiter}', {schema_name})"
 
-    #print(session.run(schema_name))
     try:
-        #print(script)     # TODO: debug info
         odf = _InternalFrame.from_run_script(session, script)     # TODO: In-memory?
     except RuntimeError:
         raise RuntimeError("The file might not exsit or the schema format might be invalid")
@@ -353,12 +350,10 @@ def read_csv(path, sep=',', delimiter=None, names=None,  index_col=None,
         if not isinstance(usecols, (list, tuple, np.ndarray)):
             usecols = [usecols]
         column_names= usecols
-        # print(data._data_columns)
         if _infer_dtype(usecols) not in ('int','str','unicode','empty'):
             raise ValueError(msg)
         if _infer_dtype(usecols) == 'int':
             column_names = [data._data_columns[i] for i in usecols]
-        # print(column_names)
         data = data[column_names]
 
     # param squeeze
@@ -458,7 +453,6 @@ def concat(objs, axis=0, join='outer', join_axes=None, ignore_index=False, keys=
     table_selections = ",".join(obj._concat_script(merged_columns, ignore_index, inner_join) for obj in objs)
     index_map = None if ignore_index else objs[0]._index_map
     script = f"unionAll([{table_selections}], false)"    # TODO: partitioned=true or false?
-    # print(script)    # TODO: debug info
     df = DataFrame._get_from_script(session, script, index_map=index_map, column_index=column_index)
     if should_return_series:
         s = df[objs[0]._data_columns[0]]
@@ -509,12 +503,6 @@ def to_datetime(arg, session=default_session(), *args, **kwargs):
 
     data = pd.to_datetime(arg, *args, **kwargs)
     return data
-    # if isinstance(data, pd.DatetimeIndex):
-    #     return DatetimeIndex(data, session=session)
-    # elif isinstance(data, pd.Timestamp):
-    #     return Timestamp(data, session=session)
-    # else:
-    #     return data
 
 
 def date_range(start=None, end=None, periods=None, freq=None, tz=None, normalize=False, name=None, closed=None, session=default_session(), **kwargs):

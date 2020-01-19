@@ -4,6 +4,7 @@ from typing import Iterable
 
 from .indexes import Index
 from .internal import _InternalAccessor
+from .merge import MergeExpression
 from .operator import (ArithExpression, BooleanExpression, DataFrameLike,
                        SeriesLike, StatOpsMixin)
 from .series import Series
@@ -133,7 +134,11 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
             raise ValueError("Orca does not support callable func; func must be a string representing a DolphinDB function")
         select_list = [func]
         orderby_list = self._orderby_list if self._sort else None
-        script = sql_select(select_list, self._var_name, self._where_expr,
+        if isinstance(self._internal, MergeExpression):
+            var_name = self._internal._from_clause
+        else:
+            var_name = self._var_name
+        script = sql_select(select_list, var_name, self._where_expr,
                             groupby_list=self._groupby_list, orderby_list=orderby_list,
                             asc=self._ascending)
         return self._run_groupby_script(func, script, self._result_index_map)
@@ -257,7 +262,7 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
             s = data[data._data_columns[0]]
             s.rename(None, inplace=True)
             return s
-        elif self.is_series_like:
+        elif self._is_series_like:
             s = data[data._data_columns[0]]
             s.rename(self._name, inplace=True)
             return s
@@ -266,7 +271,7 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
 
     def _get_data_select_list(self):
         internal = self._internal
-        if isinstance(internal, (ArithExpression, BooleanExpression)):
+        if isinstance(internal, (ArithExpression, BooleanExpression, MergeExpression)):
             return internal._get_data_select_list()
         else:
             return self._data_columns
@@ -278,7 +283,11 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
         if len(select_list) == 0:    # TODO: handle
             raise NotImplementedError()
         orderby_list = self._orderby_list if self._sort else None
-        script = sql_select(select_list, self._var_name, self._where_expr,
+        if isinstance(self._internal, MergeExpression):
+            var_name = self._internal._from_clause
+        else:
+            var_name = self._var_name
+        script = sql_select(select_list, var_name, self._where_expr,
                             groupby_list=self._groupby_list, orderby_list=orderby_list,
                             asc=self._ascending)
         return self._run_groupby_script(func, script, self._result_index_map)
@@ -287,7 +296,7 @@ class GroupByOpsMixin(metaclass=abc.ABCMeta):
     def _contextby_op(self, func, numeric_only):    # TODO: context by order
         select_list, value_list = \
             self._generate_groupby_select_list_and_value_list(func, self._groupkeys, numeric_only)
-        klass = SeriesContextByExpression if self.is_series_like else DataFrameContextByExpression
+        klass = SeriesContextByExpression if self._is_series_like else DataFrameContextByExpression
         return klass(self._session, self._internal, func, self._where_expr, self._name,
                      select_list, value_list, self._groupby_list)
 
@@ -316,7 +325,6 @@ class ContextByExpression(_InternalAccessor):
         select_list = itertools.chain(self._index_columns, select_list)
         script = sql_select(select_list, self._var_name, self._where_expr,
                             groupby_list=self._groupby_list, is_groupby=False, hint=128)
-        # print(script)    # TODO: debug info
         return GroupByOpsMixin._run_groupby_script(self, self._func, script, self._index_map)
 
     def to_pandas(self):
@@ -386,7 +394,7 @@ class GroupBy(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
                     groupkeys += column._index_columns
                     index_names += column._index_columns
                 elif isinstance(column, (ArithExpression, BooleanExpression)):
-                    if not column.is_series_like:
+                    if not column._is_series_like:
                         raise ValueError("Grouper is not 1-dimensional")
                     if column._var_name != self._var_name:
                         raise ValueError("Unable to groupby with an external Index")
@@ -403,12 +411,12 @@ class GroupBy(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def is_series_like(self):
+    def _is_series_like(self):
         pass
 
     @property
     @abc.abstractmethod
-    def is_dataframe_like(self):
+    def _is_dataframe_like(self):
         pass
 
     def __getitem__(self, key):
@@ -435,7 +443,7 @@ class GroupBy(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
                  label=None, convention='start', kind=None, loffset=None,
                  limit=None, base=0, on=None, level=None, lazy=False, **kwargs):
         from .resample import SeriesResampler, DataFrameResampler
-        klass = SeriesResampler if self.is_series_like else DataFrameResampler
+        klass = SeriesResampler if self._is_series_like else DataFrameResampler
         StatOpsMixin._validate_resample_arguments(how=how, axis=axis, fill_method=fill_method, closed=closed,
                                                   label=label, convention=convention, kind=kind, loffset=loffset,
                                                   limit=limit, base=base, on=on, level=level)
@@ -454,13 +462,6 @@ class GroupBy(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
                             having_list=[func])
         return self._run_groupby_script("", script, self._index_map)
 
-    # def size(self):
-    #     groupkeys = self._groupkeys
-    #     select_list = ["count(*)"]
-    #     script = sql_select(select_list, self._var_name, self._where_expr,
-    #                         groupby_list=groupkeys, orderby_list=groupkeys)
-    #     return self._run_groupby_script(script, groupkeys, groupby_size=True)
-
 
 class DataFrameGroupBy(DataFrameLike, GroupBy):
 
@@ -476,12 +477,12 @@ class HavingGroupBy(_InternalAccessor, GroupByOpsMixin, metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def is_series_like(self):
+    def _is_series_like(self):
         pass
 
     @property
     @abc.abstractmethod
-    def is_dataframe_like(self):
+    def _is_dataframe_like(self):
         pass
 
 
