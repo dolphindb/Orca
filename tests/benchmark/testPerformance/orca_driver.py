@@ -34,7 +34,6 @@ class OrcaDriver(object):
     def join(self):
         joined = self.df_ticker.merge(self.df_value, on='type')
         joined['total'] = joined['value'] + joined['svalue']
-        # print(joined)
 
     def resample_ms(self):
         self.df_ticker.resample('ms', on='date')['svalue'].mean()

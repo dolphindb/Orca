@@ -58,4 +58,3 @@ if __name__ == "__main__":
     csvfile.close()
 
     # json.dump(results, sys.stdout)
-    # print  # newline to file
