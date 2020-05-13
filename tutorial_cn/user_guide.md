@@ -1,44 +1,42 @@
-# Orca入门指南
-
-本文将详细介绍Orca的安装方法、基本操作，以及Orca相对pandas的差异，用户在使用Orca编程时需要注意的细节，以便用户能充分利用DolphinDB的优势，写出高效的Orca代码。
+# orca入门指南
 
  - [1 安装](#1-安装)    
  - [2 快速入门](#2-快速入门)
- - [3 Orca的架构](#3-orca的架构)
- - [4 Orca的功能限制](#4-orca的功能限制)
+ - [3 架构](#3-架构)
+ - [4 功能限制](#4-功能限制)
  - [5 最佳实践](#5-最佳实践)
- - [6 如果Orca目前无法解决我的问题，我该怎么做？](#6-如果orca目前无法解决我的问题我该怎么做)
+ - [6 如何实现orca目前不支持的功能](#6-如何实现orca目前不支持的功能)
 
 ## 1 安装
 
-Orca支持Linux和Windows系统，要求Python版本为3.6及以上，pandas版本为0.25.1及以上。
+orca支持Linux和Windows系统，要求Python版本为3.6及以上，pandas版本为0.25.1及以上。
 
-orca项目已经集成到[DolphinDB Python API](https://github.com/dolphindb/Tutorials_CN/blob/master/python_api.md)中。通过pip工具安装DolphinDB Python API，就可以使用orca。
+orca项目集成于[DolphinDB Python API](https://github.com/dolphindb/Tutorials_CN/blob/master/python_api.md)中。通过pip工具安装DolphinDB Python API，就可使用orca。
 
 ```
 pip install dolphindb
 ```
 
-Orca是基于DolphinDB Python API开发的，因此，你需要有一个DolphinDB服务器，并通过connect函数连接到这个服务器，然后运行Orca：
+orca是基于DolphinDB Python API开发的，因此，你需要打开一个DolphinDB服务器，并通过`connect(host, port, username, password)`函数连接到这个服务器，然后运行orca：
 
 ```python
->>> import dolphindb.orca as orca
->>> orca.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
+import dolphindb.orca as orca
+orca.connect("localhost", 8848, "admin", "123456")
 ```
 
-如果你已经有现成的pandas程序，可以将pandas的import替换为：
-
+若要在orca中运行已有的pandas程序，可将
 ```python
-# import pandas as pd
+import pandas as pd
+```
+改为以下脚本：
+```python
 import dolphindb.orca as pd
-
-pd.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
+pd.connect("localhost", 8848, "admin", "123456")
 ```
 
 ## 2 快速入门
 
-通过传入一列值创建一个Orca Series对象。Orca会自动为它添加一个默认索引：
-
+通过传入一列值创建一个orca Series对象。orca会自动为它添加一个默认索引：
 ```python
 >>> s = orca.Series([1, 3, 5, np.nan, 6, 8])
 >>> s
@@ -52,8 +50,7 @@ pd.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
 dtype: float64
 ```
 
-通过传入一个字典创建与Orca DataFrame对象。字典中的每个元素必须是能转化为类似Series的对象：
-
+可通过传入一个字典创建orca DataFrame对象。字典中的每个元素必须是Series或者可转化为Series的对象：
 ```python
 >>> df = orca.DataFrame(
 ...     {"a": [1, 2, 3, 4, 5, 6],
@@ -70,8 +67,7 @@ dtype: float64
 60  6  600    six
 ```
 
-也可以直接传入一个pandas DataFrame以创建Orca DataFrame：
-
+亦可直接传入一个pandas DataFrame以创建orca DataFrame：
 ```python
 >>> dates = pd.date_range('20130101', periods=6)
 >>> pdf = pd.DataFrame(np.random.randn(6, 4), index=dates, columns=list('ABCD'))
@@ -86,14 +82,13 @@ dtype: float64
 2013-01-06  1.357800  0.729484  0.142948 -0.603437
 ```
 
-现在df就是一个orca DataFrame了：
-
-```python
+验证df是一个orca DataFrame：
+```
 >>> type(df)
-<class 'orca.core.frame.DataFrame'>
+<class 'dolphindb.orca.core.frame.DataFrame'>
 ```
 
-直接打印一个Orca对象时，服务端通常会把对应的整个DolphinDB数据传送到本地，这样做可能会造成不必要的网络开销。用户可以通过`head`函数查看一个Orca对象的顶部数行：
+若要查看一个orca对象的起始数行，可使用`head`函数。对一个较大的orca对象，使用`print`命令会使服务端把该对象的所有数据传送到本地，耗时较长，请谨慎使用。
 
 ```python
 >>> df.head()
@@ -105,194 +100,223 @@ dtype: float64
 2013-01-05 -0.959676  0.860089  0.374714 -0.535574
 ```
 
-通过`index`, `columns`查看数据的索引、列名：
-
+index 属性查看数据的索引：
 ```python
 >>> df.index
 DatetimeIndex(['2013-01-01', '2013-01-02', '2013-01-03', '2013-01-04',
                '2013-01-05', '2013-01-06'],
               dtype='datetime64[ns]', freq='D')
+```
 
+columns 属性查看列名：
+```
 >>> df.columns
 Index(['A', 'B', 'C', 'D'], dtype='object')
 ```
 
-通过`to_pandas`把一个Orca DataFrame转换成pandas DataFrame：
-
-```python
+使用`to_pandas`把一个orca DataFrame转换成pandas DataFrame：
+```
 >>> pdf1 = df.to_pandas()
 >>> type(pdf1)
 <class 'pandas.core.frame.DataFrame'>
 ```
 
-通过`read_csv`加载一个CSV文件，要求CSV文件位于DolphinDB服务端，所给的路径是它在服务端的路径：
-
+`read_csv`用来加载一个位于DolphinDB服务端的CSV文件:
 ```python
 >>> df = orca.read_csv("/home/DolphinDB/Orca/databases/USPrices.csv")
 ```
 
-## 3 Orca的架构
+## 3 架构
 
-Orca的顶层是pandas API，底层是DolphinDB数据库，通过DolphinDB Python API实现Orca客户端与DolphinDB服务端的通信。Orca的基本工作原理是，在客户端通过Python生成DolphinDB脚本，将脚本通过DolphinDB Python API发送到DolphinDB服务端解析执行。Orca的DataFrame中只存储对应的DolphinDB的表的元数据，真正的存储和计算都是在服务端。
+orca的顶层是DolphinDB pandas API，底层是DolphinDB database，通过DolphinDB Python API实现orca客户端与DolphinDB服务端的通信。orca的基本工作原理是，在客户端通过pandas API生成DolphinDB脚本，将脚本通过DolphinDB Python API发送到DolphinDB服务端解析执行。
 
-### Orca如何储存数据
+### orca如何储存数据
 
-Orca对象在DolphinDB中以一个DolphinDB表的形式储存。无论是Orca DataFrame还是Orca Series，它们的底层存储都是DolphinDB表，数据列和索引列存储在同一个表中。一个Orca DataFrame所表示的DolphinDB表包含若干数据列，以及若干索引列。而一个Orca Series所表示的DolphinDB表包含一列数据列，以及若干索引列。这使得索引对齐、表内各列计算、分组聚合等操作都能较容易地实现。
+orca中的Series与DataFrame在DolphinDB server端均以一个DolphinDB数据表的形式储存，数据列和索引列存储在同一个表中。一个orca Series所对应的DolphinDB数据表包含一个数据列，以及若干索引列。一个orca DataFrame所对应的DolphinDB数据表包含若干数据列，以及若干索引列。这使得索引对齐、表内各列计算、分组聚合等操作都能比较高效地实现。
 
-Orca的DataFrame中只存储对应的DolphinDB的表的元数据，包括表名、数据的列名、索引的列名等。如果尝试访问一个DataFrame的列，返回Series时并不会创建一个新的表。返回的Series和原有的DataFrame使用同一个表，只是Orca对象所记录的元数据产生了变化。
+orca的DataFrame在Python客户端只存储对应的DolphinDB的数据表的元数据，包括表名、数据的列名、索引的列名等，数据的存储和计算都发生在DolphinDB服务端。访问一个DataFrame的某列会返回一个Series。该Series与其所属的的DataFrame对应同一个DolphinDB数据表，只是这两个orca对象所记录的元数据有所不同。
 
-## 4 Orca的功能限制
+## 4 功能限制
 
-由于Orca的架构，Orca的接口有部分限制：
+由于orca的架构设计，orca的接口有以下限制：
 
-### 列的数据类型
+### 4.1 数据类型
 
-DolphinDB的表的每一个列必须指定一种数据类型。DolphinDB的ANY类型不能作为列的数据类型。因此，Orca的每一个列不能包括混合的数据类型。此外，列中的数据也不允许是一个DolphinDB不支持的Python对象，例如Python内置的list, dict，或标准库中的datetime等对象。
+由于DolphinDB的数据表的每一个列必须指定一种数据类型，而且DolphinDB的ANY vector 不能作为数据表的一列，所以orca的DataFrame的一列中不能包括混合的数据类型。此外，一列中的元素仅可为Python内置的int, float, string等标量类型，不可为Python内置的list, dict等对象。某些为这些DolphinDB不支持的类型而设计的函数，例如`DataFrame.explode`，在orca中不支持。
 
-某些为这些DolphinDB不支持的类型而设计的函数，例如`DataFrame.explode`，在Orca中就没有实际意义。
+### 4.2 列名
 
-### 列名的限制
+DolphinDB的数据表中的列名必须是合法的DolphinDB变量名，即仅包含字母、数字或下划线，且以字母开头，且不是DolphinDB的保留字，比如if。
 
-DolphinDB的表中的列名必须是合法的DolphinDB变量名，即，仅包含字母、数字或下划线，且以字母开头，且不是DolphinDB的保留字，比如if。
+DolphinDB不允许重复的列名。因此一个orca DataFrame中的列名不能重复。
 
-DolphinDB不允许重复的列名。因此Orca的列名不能重复。
+以大写字母加下划线 ORCA_ 开头的列名是orca的列名保留字，orca会在内部将某些特殊的列（比如index）以这种形式命名。用户应该避免使用这类字符串作为orca的列名，否则结果可能不符预期。
 
-以大写字母加下划线`ORCA_`开头的列名是Orca的列名保留字，Orca会在内部将某些特殊的列（比如index）以这种形式命名。用户应该避免使用这类字符串作为Orca的列名，否则可能会出现预期之外的行为。
+### 4.3 分区表各分区之间没有顺序关系
 
-### 分区表没有严格顺序关系
-
-如果DataFrame对应的DolphinDB表是一个分区表，数据存储并非连续，所以就没有RangeIndex的概念。DolphinDB分区表的各分区之间没有严格顺序关系。因此，如果一个DataFrame表示的是一个DolphinDB分区表，这些操作无法完成：
+由于DolphinDB分区表的各分区之间没有顺序关系，pandas.RangeIndex不适用。因此，如果一个orca DataFrame表示的是一个DolphinDB分区表，下列操作无法完成：
 
 - 对分区表通过iloc访问相应的行
 - 将一个不同分区类型的Series或DataFrame赋值给一个DataFrame
 
-### 部分函数仅不支持分布式调用
+### 4.4 部分函数暂不支持分布式调用
 
 DolphinDB的某些内置函数目前暂不支持分布式的版本，例如`median`, `quantile`, `mad`。
 
-### 空值机制不同
+### 4.5 空值机制
 
-DolphinDB的数值空值是用每个数据类型的最小值表示。而pandas的空值是用浮点数的nan表示。Orca的空值机制和DolphinDB保持一致，仅当发生网络传输（下载）时，会将DolphinDB包含空值的数值列转化成浮点数类型，将其中的空值转化为nan。
+DolphinDB中的空值是用每个数据类型的最小值表示，而pandas的空值是用浮点数的NaN表示。orca的空值机制与DolphinDB保持一致。
 
-对于字符串类型，pandas的空值依然是nan，这就导致，pandas在储存包含空值的字符串时，实际上是使用字符串和浮点数混合类型。而[混合类型的列在DolphinDB中是不允许的](#列的数据类型)。DolphinDB用空字符串表示字符串类型的空值。用户如果想要上传一个包含空值的字符串，应该对字符串列进行预处理，填充空值：
+当数据从DolphinDB下载到orca时，系统会自动将包含空值的数值列转化成浮点数类型，并将其中的空值转化为NaN。
 
+以一个简单例子解释。在DolphinDB中生成数据表pt：
+```
+n=100
+dates=take(2018.01.01..2020.01.01, n)
+syms =take(`AAPL``XOM, n)
+price=rand(1.5 2.6 NULL 3.8 NULL 4.5, n)
+volume = rand(100 200 NULL, n)
+t=table(dates as date, syms as sym, price, volume)
+dbPath="dfs://stocks"
+if(existsDatabase(dbPath)){
+    dropDatabase(dbPath)
+}
+db=database(dbPath, RANGE,  2018.01.01 2019.01.01 2020.01.01)
+pt=db.createPartitionedTable(t, `pt, `date).append!(t)
+```
+然后将数据表pt下载到orca：
+```python
+>>> df=orca.read_table("dfs://stocks","pt") 
+>>> df.head()
+        date   sym  price  volume
+0 2018-01-01  AAPL    NaN     NaN
+1 2018-01-02          3.8     NaN
+2 2018-01-03   XOM    NaN   200.0
+3 2018-01-04  AAPL    3.8   100.0
+4 2018-01-05          NaN   200.0
+```
+可见，因含有空值，volume列被自动转化为浮点类型。请注意，DolphinDB数据表中sym列（字符串列）中的空值现在被转化为空字符串""，而非NaN。若用户需要区分空字符串与NaN，则需进行如下操作：
+
+
+
+由于pandas字符串类型的空值依然是NaN，所以pandas中包含空值的字符串列为字符串和浮点数混合类型。由于[DolphinDB中不允许混合类型的列](#数据类型)，所以从pandas上传到DolphinDB一个包含空值的字符串列之前，必须将其中的NaN改为Python的空字符串("")：
 ```python
 df = pd.DataFrame({"str_col": ["hello", "world", np.nan]})
-odf = orca.DataFrame(df)    # Error
-odf = orca.DataFrame(df.fillna({"str_col": ""}))    # Correct way to upload a string column with NULL values
+odf = orca.DataFrame(df.fillna({"str_col": ""}))
 ```
 
-### 轴（axis）的限制
+### 4.6 跨列计算
 
-DolphinDB作为列式存储的数据库，对逐行（row-wise）操作的支持要好于逐列（column-wise）操作。许多操作，例如求和、求平均值等聚合运算，跨行的聚合（求每一列的函数值）的性能要高于跨列的聚合（求每一行的函数值），大多函数都支持跨行计算，但仅有少量函数，例如`sum`, `mean`, `max`, `min`, `var`, `std`等，支持跨列计算。在pandas中，在函数的参数中指定axis=0或axis='index'就能完成跨行的计算，而指定axis=1或axis='columns'能完成跨列的计算。而Orca函数常常仅支持axis=0或axis='index'。
+DolphinDB作为列式存储的数据库，对跨行（row-wise）计算的支持要好于跨列（column-wise）计算。pandas中的函数的参数中指定axis=0或axis='index'为跨行的计算，指定axis=1或axis='columns'为跨列的计算。orca函数大多数仅支持跨行计算(axis=0或axis='index')。仅有少量函数，例如`sum`, `mean`, `max`, `min`, `var`, `std`等，支持跨列计算。对求和、求平均值等聚合运算，跨行的聚合（求一列的函数值）的性能要高于跨列的聚合（求一行的函数值）。
 
-Orca的DataFrame也不支持`transpose`（转置）操作。因为转置后的DataFrame中的一列就可能包含混合类型的数据。
+orca的DataFrame也不支持`transpose`（转置）操作，因为转置后的DataFrame中的一列可能包含混合类型的数据。
 
-### 不接受Python可调用对象作为参数
+### 4.7 不接受Python可调用对象作为参数
 
-DolphinDB Python API目前无法解析Python函数，因此，例如`DataFrame.apply`, `DataFrame.agg`等函数无法接受一个Python可调用对象作为参数。
+DolphinDB Python API目前无法解析Python函数，因此，pandas中与高阶函数有关的API，例如`DataFrame.apply`, 无法接受一个Python可调用对象(callable)作为参数。
 
-对于这个限制，Orca提供了一个备选方案：传入一个DolphinDB字符串，它可以是DolphinDB的内置函数、自定义函数或条件表达式等。详细内容请参考[高阶函数](#高阶函数)一节。
+针对这个限制，orca目前的解决方案为：传入一个用Python字符串表示的DolphinDB脚本，它可以是DolphinDB的内置函数、自定义函数或条件表达式等。详细内容请参考[高阶函数](#高阶函数)一节。
 
 ## 5 最佳实践
 
-### 减少`to_pandas`和`from_pandas`的调用
+### 5.1 减少`to_pandas`和`from_pandas`的调用
 
-orca使用DolphinDB Python API与服务端通信。实际的数据储存、查询和计算都发生在服务端，orca仅仅是一个提供了类似pandas接口的客户端。因此，系统的瓶颈常常在网络通信上。用户在编写高性能的orca程序时，需要关注如何优化程序，以减少网络通信量。
+orca使用DolphinDB Python API与服务端通信。数据储存、查询和计算都发生在服务端，orca仅仅是一个提供了类似pandas接口的客户端。因此，系统的瓶颈常常在网络通信上。用户在编写高性能的orca程序时，需要关注如何优化程序，以减少网络通信量。
 
-调用`to_pandas`函数将orca对象转化为pandas对象时，服务端会把整个DolphinDB对象传输到客户端。如果没有必要，一般应该减少这样的转换。此外，以下操作会隐式调用`to_pandas`，因此也需要注意：
+调用`to_pandas`函数将orca对象转化为pandas对象时，服务端会把整个DolphinDB对象传输到客户端。如果没有必要，一般应该减少这样的转换。
 
-- 打印一个表示非分区表的Orca DataFrame或Series
-- 调用`to_numpy`或访问`values`
-- 调用`Series.unique`, `orca.qcut`等返回numpy.ndarray的函数
+此外，以下操作会隐式调用`to_pandas`，因此也需要注意：
+
+- 打印一个表示非分区表的orca DataFrame或Series
+- 调用`to_numpy`或`values`
+- 调用`Series.unique`或`orca.qcut`等返回numpy.ndarray的函数
 - 调用`plot`相关函数画图
-- 将Orca对象导出为第三方格式的数据
+- 将orca对象导出为第三方格式的数据
 
-类似地，`from_pandas`会将本地的pandas对象上传到DolphinDB服务端。当`orca.DataFrame`和`orca.Series`的data参数为非Orca对象时，也会先在本地创建一个pandas对象，然后上传到DolphinDB服务端。在编写Orca代码时，应该考虑减少来回的网络通信。
+类似地，`from_pandas`会将本地的pandas对象上传到DolphinDB服务端。当`orca.DataFrame`和`orca.Series`的data参数为非orca对象时，也会先在本地创建一个pandas对象，然后上传到DolphinDB服务端。在编写orca代码时，应该考虑减少来回的网络通信。
 
-### Orca并非总是立刻求值
+### 5.2 惰性求值
 
-Orca采用了惰性求值策略，某些操作不会立刻在服务端计算，而是转化成一个中间表达式，直到真正需要时才发生计算。需要触发计算时，用户应调用`compute`函数。例如，对同一个DataFrame中的列进行四则运算，不会立刻触发计算：
+orca采用了惰性求值策略，本章所列举的操作，若涉及一个orca对象，不会立刻发生计算，而是转化成一个中间表达式。需要触发计算时，调用`compute`函数。
+
+请注意，涉及多个不同orca对象的运算，不会采用惰性求值策略。
+
+#### 5.2.1 四则运算、逻辑运算或使用非聚合函数
 
 ```python
->>> df = orca.DataFrame({"a": [1, 2, 3], "b": [10, 10, 30]})
->>> c = df["a"] + df["b"]
->>> c    # not calculated yet
+>>> df = orca.DataFrame({"a": [1, 2, 3], "b": [10, 10, 30], "c": [10, -5, 0]})
+>>> x = df["a"] + df["b"]
+>>> x    # not calculated yet
 <orca.core.operator.ArithExpression object at 0x0000027FA5527B70>
 
->>> c.compute()    # trigger the calculation
+>>> x.compute()    # trigger the calculation
 0    11
 1    12
 2    33
 dtype: int64
 ```
+```python
+>>> y = df.c.abs()
+>>> y    # not calculated yet
+<orca.core.operator.ArithExpression object at 0x0000015A49C0D13>
 
-又如，条件过滤查询不会立刻触发计算：
+>>> y.compute()
+0    10
+1    5
+2    0
+dtype: int64
+```
+```python
+>>> c = df.cumsum()
+>>> c
+<dolphindb.orca.core.operator.ArithExpression at 0x2b2b487dcf8>
+
+>>> c.compute()    
+   a   b   c
+0  1  10  10
+1  3  20   5
+2  6  50   5
+```
+
+```python
+>>> c = df.transform("sqrt")
+>>> c
+<dolphindb.orca.core.operator.ArithExpression at 0x2b2b484d048>
+
+>>> c.compute()    
+          a         b         c
+0  1.000000  3.162278  3.162278
+1  1.414214  3.162278       NaN
+2  1.732051  5.477226  0.000000
+```
+请注意，所有聚合函数都不采用惰性求值策略。
+
+#### 5.2.2 条件过滤查询
 
 ```python
 >>> d = df[df["a"] > 2]
 >>> d
 <orca.core.frame.DataFrame object with a WHERE clause>
 
->>> d.compute()    # trigger the calculation
+>>> d.compute()   
    a   b
 2  3  30
 ```
 
-分组后使用`cumsum`等函数聚合，或调用`transform`，也不会立刻返回结果：
-
 ```python
->>> c = df.groupby("b").cumsum()
->>> c
-<orca.core.operator.DataFrameContextByExpression object at 0x0000017C010692B0>
+>>> d = df[df.a.isin([2, 3])]
+>>> d
+<'dolphindb.orca.core.frame.DataFrame' object with a WHERE clause>
 
->>> c.compute()    # trigger the calculation
-   a
-0  1
-1  3
-2  3
-
->>> c = df.groupby("b").transform("count")
->>> c
-<orca.core.operator.DataFrameContextByExpression object at 0x0000012C414FE128>
-
->>> c.compute()    # trigger the calculation
-   a
-0  2
-1  2
-2  1
+>>> d.compute()    
+   a   b  c
+1  2  10 -5
+2  3  30  0
 ```
 
-#### 操作同一个DataFrame里的列以提高性能
+### 5.3 避免使用NumPy函数处理orca对象
 
-如果操作的是同一个DataFrame里的列，Orca可以将这些操作优化为单个DolphinDB SQL表达式。这样的操作会有较高性能。例如：
-
-- 逐元素计算：`df.x + df.y`, `df * df`, `df.x.abs()`
-- 过滤行的操作：`df[df.x > 0]`
-- isin操作：`df[df.x.isin([1, 2, 3])]`
-- 时间类型/字符串访问器：`df.date.dt.month`
-- 用同样长度的计算结果赋值：`df["ret"] = df["ret"].abs()`
-
-当DataFrame是经过过滤的结果时，如果过滤的条件完全相同（在Python中是同一个对象，即调用`id`函数获得的值相同），也能做到这样的优化。
-
-以下脚本可以优化：
-
-```python
-df[df.x > 0] = df[df.x > 0] + 1
-```
-
-上述脚本中，等号两边的过滤条件虽然看似相同，但在Python中实际产生了两个不同的对象。在DolphinDB引擎中会先执行一个select语句，再执行一个update语句。如果将这个过滤条件赋值给一个中间变量，Orca就可以将上述代码优化为单个DolphinDB的update语句：
-
-```python
-df_x_gt_0 = df.x > 0
-df[df_x_gt_0] = df[df_x_gt_0] + 1
-```
-
-### 避免用NumPy函数处理Orca对象
-
-用户应该避免用NumPy函数处理Orca对象。Orca的附属项目DolphinDB NumPy对这些操作有优化，详见[DolphinDB NumPy使用教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/dolphindb_numpy.md)。
-
-以下将解释为何直接使用NumPy函数或对象进行运算是不恰当的。
+应避免使用NumPy函数处理orca对象。对orca对象，尽量使用orca内置函数或[DolphinDB NumPy函数](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/dolphindb_numpy.md)。
 
 pandas中经常用NumPy函数处理一个DataFrame或Series，例如：
 
@@ -305,9 +329,9 @@ pandas中经常用NumPy函数处理一个DataFrame或Series，例如：
 dtype: float64
 ```
 
-应该避免在Orca中使用这种写法。因为NumPy函数不识别Orca对象，会将Orca对象当成一个一般的类似数组的对象，对它进行遍历计算。这样会带来大量不必要的网络开销，返回的类型也并非一个Orca对象。在某些情况下，还可能抛出难以理解的异常。
+若在orca中使用这种写法，由于NumPy函数不识别orca对象，会将orca对象当成一个一般的类似数组(array-like)的对象，对它进行遍历计算。这样会带来大量不必要的网络开销（networking overhead），返回的类型也并非一个orca对象。在某些情况下，还可能抛出难以理解的异常。
 
-Orca对一些常用的计算函数，例如`log`, `exp`等进行了扩展。对于以上pandas脚本，可用Orca改写如下：
+orca提供了一些常用的计算函数，例如`log`, `exp`等。对于以上pandas脚本，可用orca改写如下：
 
 ```python
 >>> os = orca.Series([1,2,3])
@@ -315,9 +339,8 @@ Orca对一些常用的计算函数，例如`log`, `exp`等进行了扩展。对�
 <orca.core.operator.ArithExpression object at 0x000001FE099585C0>
 ```
 
-此时，`os.log()`采取了[惰性求值](#orca并非总是立刻求值)策略，返回结果为一个中间表达式，用户可以继续对这个表达式进行四则运算、比较运算、调用数值计算函数，直到真正需要获得计算结果时，才调用`compute`进行计算：
-
-```
+`os.log()`采取了[惰性求值](#惰性求值)策略：
+```python
 >>> os = orca.Series([1,2,3])
 >>> tmp = os.log()
 >>> tmp += os * 2
@@ -331,195 +354,187 @@ Orca对一些常用的计算函数，例如`log`, `exp`等进行了扩展。对�
 dtype: float64
 ```
 
-总之，在遇到上述情况时，用[DolphinDB NumPy](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/dolphindb_numpy.md)代替NumPy，可以规避这些问题。
+### 5.4 修改数据表的限制
 
-### 修改表数据的限制
+在orca中，一个表的列的数据类型无法修改。
 
-在DolphinDB中，一个表的列的数据类型无法修改。
-
-此外，一个非内存表（例如DFS表）有这些限制：
-
+修改一个非内存表（例如DFS表）有这些限制：
 - 无法添加新的列
-- 无法通过update语句修改其中的数据
+- 无法通过`update`函数修改其中的数据
 
-而一个分区表有这些限制：
+修改一个分区表有这些限制：
+- 无法通过`update`函数将一个向量赋值给一个列
 
-- 不同分区的数据之间没有严格的顺序关系
-- 无法通过update语句将一个向量赋值给一个列
+当用户尝试对一个orca对象进行修改时，操作失败的可能的原因有以下几条：
+- 更新的数据类型不兼容，例如不可将一个字符串赋值给一个整数列。
+- 在创建一个表示分区表的orca DataFrame时，若没有对其添加索引，orca也无法自动为其添加默认索引，因为对分区表无法添加列。此时会给出一个警告。
+- 为一个表示分区表的orca DataFrame更新或添加一个列时，这个列（新值）不允许是Python或NumPy数组，或一个表示内存表的orca Series，仅可为基于该对象内部数据进行计算得到的结果。
 
-因此，当用户尝试对一个Orca对象进行修改时，操作可能会失败。Orca对象的修改有以下规则：
+当尝试给表示非内存表的orca对象添加列，或修改其中数据时，数据会加载为内存表，然后再进行修改。当处理海量数据时，可能导致内存不足。因此应该尽量避免对这类orca对象的修改操作。
 
-- 更新的数据类型不兼容，例如将一个字符串赋值给一个整数列时，会抛出异常
-- 为一个表示非内存表的orca对象添加列，或修改其中的数据时，会将这个表复制为内存表中，并给出一个警告
-- 自动为一个表示分区表的orca对象添加默认索引时，并不会真正添加一个列，此时会给出一个警告
-- 为一个表示分区表的orca对象设置或添加一个列时，如果这个列是一个Python或NumPy数组，或一个表示内存表的orca Series时，会抛出异常
-
-当尝试给表示非内存表的orca对象添加列，或修改其中数据时，数据会复制为内存表，然后再进行修改。当处理海量数据时，可能导致内存不足。因此应该尽量避免对这类orca对象的修改操作。
-
-Orca部分函数不支持inplace参数。因为inplace涉及到修改数据本身。
-
-例如，以下orca脚本尝试为df添加一个列，会将DFS表复制为内存表，在数据量较大时可能会有性能问题：
+例如，为计算一个DFS数据表中每组内两列乘积之和，以下脚本为orca对象df添加一个新列total，为price与amount两列的乘积。这个操作会将DFS表加载为内存表。
 
 ```python
-df = orca.load_table("dfs://orca", "tb")
-df["total"] = df["price"] * df["amount"]     # Will copy the DFS table as an in-memory segmented table!
+df = orca.read_table("dfs://orca", "tb")
+df["total"] = df["price"] * df["amount"]     # Will load the DFS table as an in-memory segmented table!
 total_group_by_symbol = df.groupby(["date", "symbol"])["total"].sum()
 ```
 
-以上脚本可以优化，不设置新的列，以避免大量数据复制。本例采用的优化方法是将分组字段date和symbol通过`set_index`设置为索引，并通过指定`groupby`的level参数，按索引字段进行分组聚合，指定`groupby`的lazy参数为True，不立刻对total进行计算。这样做，能避免添加一个新的列：
-
+使用以下步骤，可以避免创建新的列，以避免不必要的数据复制。
+- 1. 将分组字段date和symbol通过`set_index`设置为索引，然后通过指定`groupby`的level参数，按索引字段进行分组聚合。
+- 2. 指定`groupby`的lazy参数为True，不立刻对total进行计算（乘法）。
 ```python
-df = orca.load_table("dfs://orca", "tb")
-df.set_index(["date", "symbol"], inplace=True)
-total = df["price"] * df["amount"]     # The DFS table is not copied
+df = orca.read_table("dfs://orca", "tb")
+df.set_index(["date", "symbol"], inplace=True)  # happens on the client side, not on the server side
+total = df["price"] * df["amount"]     # The DFS table is not loaded into memory. Calculation has not happened yet. 
 total_group_by_symbol = total.groupby(level=[0,1], lazy=True).sum()
 ```
 
-### 高阶函数
+此外，由于分布表无法被修改，所以orca的某些函数不支持inplace参数，因为这会导致修改输入数据。
 
-pandas的许多接口，例如`DataFrame.apply`, `GroupBy.filter`等，都允许接受一个Python的可调用对象作为参数。Orca本质上是通过Python API，将用户的程序解析为DolphinDB的脚本进行调用。因此，Orca目前不支持解析Python的可调用对象。如果用户传入一个或多个可调用对象，这些函数会尝试将Orca对象转换为pandas对象，调用pandas的对应接口，然后将结果转换回Orca对象。这样做不仅带来额外的网络通信，也会返回一个新的DataFrame，使得部分计算无法达到在同一个DataFrame上操作时那样的高性能。
 
-作为替代方案，对于这些接口，Orca可以接受一个字符串，将这个字符串传入DolphinDB进行计算。这个字符串可以是一个DolphinDB的内置函数（或内置函数的部分应用），一个DolphinDB的自定义函数，或者一个DolphinDB条件表达式，等等。这个替代方案为Orca带来了灵活性，用户可以按自己的需要，编写一段DolphinDB的脚本片段，然后，像pandas调用用户自定义函数一样，利用DolphinDB计算引擎执行这些脚本。
+### 5.5 高阶函数
 
-以下是将pandas接受可调用对象作为参数的代码改写为Orca代码的例子：
+pandas的许多接口，例如`DataFrame.apply`, `GroupBy.filter`等，都允许接受一个Python的可调用对象(callable)作为参数。orca通过Python API，将用户的程序解析为DolphinDB的脚本进行调用。因此，orca目前不支持解析Python的可调用对象。如果用户传入Python的可调用对象，这些函数会尝试将orca对象转换为pandas对象，调用pandas的对应接口，然后将结果转换回orca对象。这样做不仅导致额外的网络通信，也会返回一个新的orca对象，使得部分计算无法达到在同一个DataFrame上操作时那样的高性能。
 
-#### 求分组加权平均数
+作为替代方案，对于这些接口，orca可以接受一个字符串，将这个字符串传入DolphinDB以执行。这个字符串可以是一个DolphinDB的内置函数（或内置函数的部分应用），一个DolphinDB的自定义函数，或者一个DolphinDB条件表达式，等等。
+
+以下是将pandas接受可调用对象作为参数的代码改写为orca代码的例子：
+
+#### 5.5.1 求分组加权平均数
 
 pandas:
-
 ```python
 wavg = lambda df: (df["prc"] * df["vol"]).sum() / df["vol"].sum()
 df.groupby("symbol").apply(wavg)
 ```
 
-Orca:
-
+orca:
 ```python
 df.groupby("symbol")["prc"].apply("wavg{,vol}")
 ```
 
-Orca脚本通过apply函数，对group by之后的prc列调用了一个DolphinDB的部分应用`wavg{,vol}`，转化为DolphinDB的脚本，等价于：
-
+orca脚本通过`apply`函数，对group by之后的prc列调用了一个DolphinDB的部分应用`wavg{,vol}`。等价于以下DolphinDB脚本：
 ```SQL
 select wavg{,vol}(prc) from df group by symbol
 ```
 
-将这个部分应用展开，等价于：
-
+更易于理解的版本：
 ```SQL
 select wavg(prc,vol) from df group by symbol
 ```
 
-#### 分组后按条件过滤
+#### 5.5.2 分组后按条件过滤
 
 pandas:
-
 ```python
 df.groupby("symbol").filter(lambda x: len(x) > 1000)
 ```
 
-Orca:
-
+orca:
 ```python
-df.groupby("symbol").filter("size(*) > 1000")
+df.groupby("symbol").filter("count(*) > 1000")
 ```
 
-上述例子的Orca脚本中，filter函数接受的字符串是一个过滤的条件表达式，转化为DolphinDB的脚本，等价于：
-
+上述例子的orca脚本中，`filter`函数接受的字符串是一个过滤的条件表达式。转化为DolphinDB的脚本，等价于：
 ```SQL
-select * from df context by symbol having size(*) > 10000
+select * from df context by symbol having count(*) > 10000
 ```
 
-即，filter的字符串出现在了SQL的having语句中。
-
-#### 对整个Series应用一个运算函数
+#### 5.5.3 对整个Series应用同一个运算函数
 
 pandas:
-
 ```python
 s.apply(lambda x: x + 1)
 ```
 
-Orca:
-
+orca:
 ```python
 s.apply("(x->x+1)")
 ```
 
 pandas:
-
 ```python
 s.apply(np.log)
 ```
 
-Orca:
-
+orca:
 ```python
 s.apply("log")
 ```
 
-常用的计算函数，比如`log`, `exp`, `floor`, `ceil`, 三角函数，反三角函数等，Orca已经集成。例如，求对数，通过`s.log()`即可实现。
+orca提供常用的计算函数包括`log`, `exp`, `floor`, `ceil`, 三角函数，反三角函数等。
 
-### 过滤时用逗号(,)代替&符号
+#### 5.5.4 实现DolphinDB的context by语句
 
-DolphinDB的where表达式中，逗号表示执行顺序，并且效率更高，只有在前一个条件通过后才会继续验证下一个条件。Orca对pandas的条件过滤进行了扩展，支持在过滤语句中用逗号：
+pandas中，`groupby`后调用`shift`, `cumsum`, `bfill`等函数，可以实现DolphinDB中的[context by语句](https://www.dolphindb.cn/cn/help/contextby.html)与`move`, `cumsum`, `bfill`等函数组合使用的功能。orca的写法和pandas相同：
 
 pandas:
+```
+df.groupby("symbol")["prc"].shift(1)
+```
+orca:
+```
+df.groupby("symbol")["prc"].shift(1).compute()
+```
 
+请注意lambda函数在pandas与orca中的不同写法：
+
+pandas:
+```python
+df.groupby("symbol")["prc"].transform(lambda x: x - x.mean())
+```
+orca中可改写为：
+```python
+df.groupby("symbol")["prc"].transform("(x->x - x.mean())").compute()
+```
+
+### 5.6 过滤时用逗号(,)代替&符号
+
+orca对pandas的条件过滤进行了扩展，支持在过滤语句中用逗号。逗号表示执行顺序，并且效率比使用 & 更高，只有在前一个条件通过后才会继续验证下一个条件。
+
+pandas:
 ```python
 df[(df.x > 0) & (df.y < 0)]
 ```
 
-Orca:
-
+orca:
 ```python
 df[(df.x > 0), (df.y < 0)]
 ```
 
-使用传统的&符号，会在最后生成DolphinDB脚本时将where表达式中的&符号转换为DolphinDB的`and`函数。而使用逗号，会在where表达式中的对应位置使用逗号，以达到更高的效率。
+#### 5.7 某些过滤条件的优化写法
 
-### 如何实现DolphinDB的context by语句
-
-DolphinDB支持[context by语句](https://www.dolphindb.cn/cn/help/contextby.html)，支持在分组内处理数据。在Orca中，这个功能可以通过`groupby`后调用`transform`实现。而`transform`通常需要用户提供一个DolphinDB自定义函数字符串。Orca对`transform`进行了扩展。对一个中间表达式调用`groupby`，并指定扩展参数lazy=True，然后不给定参数调用`transform`，则Orca会对调用`groupby`的表达式进行context by的计算。例如：
-
-pandas:
+当运算涉及到条件过滤时，有时等号双方针对同一个orca对象的过滤条件**完全**相同（在Python中是同一个对象，即调用`id`函数获得的值相同）。例如：
 
 ```python
-df.groupby("date")["prc"].transform(lambda x: x.shift(5))
+df[df.x > 0] = df[df.x > 0] + 1
 ```
 
-Orca的改写:
+上述脚本中，等号两边的过滤条件虽然看似相同，但在Python中，每一个`df.x > 0`的调用都产生了新的对象，这会导致orca中产生一个不必要的对象，影响性能。可使用以下脚本进行优化，将这个过滤条件赋值给一个中间变量。orca会执行一个update语句。
 
 ```python
-df.groupby("date")["id"].transform("shift{,5}")
+df_x_gt_0 = (df.x > 0)
+df[df_x_gt_0] = df[df_x_gt_0] + 1
 ```
 
-Orca的扩展用法:
+## 6 如何实现orca尚不支持的功能
 
-```python
-df.shift(5).groupby("date", lazy=True)["id"].transform()
-```
+本文解释了诸多orca与pandas的差异，以及orca的一些限制。如果无法规避这些限制（例如，orca的函数不支持某些参数，或者，`apply`一个复杂的自定义函数，其中包括了第三方库函数调用而DolphinDB中尚未支持这些功能），可使用`to_pandas`函数将orca的DataFrame/Series转化为pandas的DataFrame/Series，在pandas中运行后，将计算结果转换回orca对象。
 
-这是Orca的一个特别的用法，它充分利用了惰性求值的优势。在上述代码中，`df.shift(5)`并没有发生真正的计算，而只是生成了一个中间表达式（通过`type(df.shift(5))`会发现它是一个ArithExpression，而不是DataFrame）。如果指定了`groupyby`的扩展参数lazy=True，`groupby`函数就不会对表达式计算后的结果进行分组。
-
-在[动量交易策略](#)教程中，我们就充分利用了这个扩展功能，来实现DolphinDB的context by。
-
-
-## 6 如果Orca目前无法解决我的问题，我该怎么做？
-
-本文解释了诸多Orca与pandas的差异，以及Orca的一些限制。如果你无法规避这些限制（比如，Orca的函数不支持某个参数，或者，`apply`一个复杂的自定义函数，其中包括了第三方库函数调用，DolphinDB中没有这些功能），那么，你可以将Orca的DataFrame/Series通过`to_pandas`函数转化为pandas的DataFrame/Series，通过pandas执行计算后，将计算结果转换回Orca对象。
-
-比如，Orca目前不支持`rank`函数的method="average"和na_option="keep"参数，如果你必须使用这些参数，你可以这么做：
-
+例如，orca目前不支持`rank`函数的method="average"和na_option="keep"参数：
 ```python
 >>> df.rank(method='average', na_option='keep')
 ValueError: method must be 'min'
+```
 
+如果必须使用这些参数，可以使用以下脚本：
+```
 >>> pdf = df.to_pandas()
 >>> rank = pdf.rank(method='average', na_option='keep')
 >>> rank = orca.DataFrame(rank)
 ```
 
-这样做可以解决你的问题，但它带来了额外的网络通信，同时，新的DataFrame的底层存储的表不再是原先的DataFrame所表示的表，因此无法执行[针对同一个DataFrame操作的一些优化](#操作同一个dataframe里的列以提高性能)。
+以上脚本可以解决问题，但导致了额外的网络通信。
 
-Orca目前还处于开发阶段，我们今后会为DolphinDB添加更丰富的功能。届时，Orca的接口、支持的参数也会更完善。
+orca目前还处于开发阶段，我们今后会为DolphinDB添加更丰富的功能。届时，orca的接口、支持的参数也会更完善。
