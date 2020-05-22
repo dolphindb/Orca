@@ -5,8 +5,9 @@
 - [1 将数据导出到磁盘](#1-将数据导出到磁盘)
 - [2 将数据保存到orca数据表](#2-将数据保存到orca数据表)
   - [2.1 保存数据到orca内存表](#21-保存数据到orca内存表)
-  - [2.2 保存数据到orca磁盘表](#22-保存数据到orca磁盘表)
-  - [2.3 保存数据到orca分布式表](#23-保存数据到orca分布式表)
+  - [2.2 保存数据到orca分布式表](#22-保存数据到orca分布式表)
+  - [2.3 保存数据到磁盘表](#23-保存数据到磁盘表)
+
 
 ### 1 将数据导出到磁盘
 
@@ -37,17 +38,8 @@ orca的Series和DataFrame均支持`to_csv`，`to_excel`等将数据导出为指�
 基于DolphinDB的数据表设计，orca数据表按存储方式分为三种:
 
 - 内存表：数据仅保存在DolphinDB服务端内存中，存取速度最快。可以使用`read_csv`函数导入或者通过`DataFrame`函数创建。
-- 本地磁盘表：数据保存在DolphinDB服务端本地磁盘，可以使用`read_table`函数加载到内存。
-- 分布式表：数据存储在DolphinDB服务端。可以通过`read_csv`函数将文本文件导入分布式表并加载分布式表信息，或者通过`read_table`函数加载分布式表信息。加载后，客户端并没有将数据加载到内存，而只是获得了数据库和表的元数据。
-
-- 磁盘表
-
-   磁盘表分为本地磁盘表和磁盘分区表。本地磁盘表没有对数据分区，而磁盘分区表对数据进行了分区。
-   
-- 分布式表
-
-   分布式表是DolphinDB推荐在生产环境下使用的数据存储方式。它支持快照级别的事务隔离，保证数据一致性。分布式表支持多副本机制，支持数据容错与负载均衡。
-   
+- 分布式表：数据存储在DolphinDB服务端。可以通过`read_csv`函数将文本文件导入分布式表并加载分布式表信息，或者通过`read_table`函数加载分布式表信息。加载后，客户端并没有将数据加载到内存，而只是获得了数据库和表的元数据。分布式表是DolphinDB推荐在生产环境下使用的数据存储方式。它支持快照级别的事务隔离，保证数据一致性。分布式表支持多副本机制，支持数据容错与负载均衡。
+- 磁盘表：数据存储在DolphinDB服务端，可以使用`read_table`函数加载到内存。不建议在生产环境下使用。
 
 #### 2.1 保存数据到orca内存表
 
@@ -68,103 +60,22 @@ pandas提供的[`append`](https://pandas.pydata.org/pandas-docs/stable/reference
 ```
 > 请注意：当inplace参数为True时，ignore_index参数的值不允许设置为True，只能为默认值False。
 
-#### 2.2 保存数据到orca磁盘表
+#### 2.2 保存数据到orca分布式表
 
-orca提供两种方式修改磁盘表的数据：
+orca提供两种方式修改保存至磁盘上的数据：
 
 - `append`函数
 
-- `save_table`函数，用于保存数据到磁盘表和分布式表。对于本地磁盘表会覆盖原表；对DFS表会追加数据而不覆盖。
+- `save_table`函数，对DFS表会追加数据。
 
 该函数参数如下：
 |参数|用法|
 |:--|:--|
+|df|需要保存的数据表|
 |db_path|数据库路径|
 |table_name|表名|
-|df|需要保存的数据表|
 |ignore_index|是否忽略index追加数据|
 
-#### 2.2.1 保存数据到orca本地磁盘表
-
-首先创建数据库DB1及数据表tb1：
-
-```python
->>> YOUR_DIR = "/dolphindb/database" 
->>> df = orca.DataFrame({"type": np.random.choice(list("abcde"),10), 
-                         "value": np.random.sample(10)})
->>> orca.save_table(df, YOUR_DIR + "/DB1", "tb1")
-```
-  
-使用`read_table`函数导入数据表为内存表df。
-```python
->>> df = orca.read_table(YOUR_DIR + "/DB1", "tb1")
->>> len(df)
-10
-```
-
-使用`append`追加数据到df，并通过`save_table`保存数据到磁盘。
-```python
->>> df1 = orca.DataFrame({"type": np.random.choice(list("abcde"),3), 
-                          "value": np.random.sample(3)*100})
->>> df.append(df1, inplace=True)
->>> len(df)
-13
-
->>> orca.save_table(df, YOUR_DIR + "/DB1", "tb1")
-```
-对于磁盘表，若该指定的表名不存在于数据库中，`save_table`会创建对应的表；若数据库中已有同名的表，`save_table`会覆盖该表。
-
-
-#### 2.2.2 保存数据到orca磁盘分区表
-
-磁盘分区表与分布式表的差异在于分布式表的数据库路径以"dfs://"开头，而磁盘分区表的数据库路径是本地的一个绝对路径。
-
-首先，创建磁盘分区数据库DB2，采用VALUE分区。
-```python
->>> YOUR_DIR = "/dolphindb/database" 
->>> s = orca.default_session()
->>> create_database = """
-dbPath='{dbPath}'
-login('admin', '123456')
-if(existsDatabase(dbPath))
-  dropDatabase(dbPath)
-db=database(dbPath, VALUE, `a`b`c`d`e)
-""".format(dbPath=YOUR_DIR + "/DB2")
->>> s.run(create_database)
-```
-
-使用orca的`read_csv`函数，将[第1节](#1-将数据导出到磁盘)例子中的csv文件导入到磁盘分区数据库DB2，保存为数据表tb1，并返回orca DataFrame对象df：
-```python
->>> df = orca.read_csv(path=YOUR_DIR + "/sample.csv", dtype={"type": "SYMBOL", "value": np.float64}, db_handle=YOUR_DIR + "/DB2", table_name="tb1", partition_columns="type")
->>> len(df)
-100
-```
-
-- 使用`save_table`函数将数据保存到磁盘分区表。若表已存在，会覆盖该表。
-   
-    ```python
-    >>> df1 = orca.DataFrame({"type": np.random.choice(list("abcde"),3), "value": np.random.sample(3)*100})
-    >>> orca.save_table(df1, YOUR_DIR + "/DB2", "tb1")
-    >>> df = orca.read_table(YOUR_DIR + "/DB2", "tb1")
-    >>> len(df)
-    3
-    ```
-    可见，tb1中之前存有的100行数据已被覆盖。
-
-- 使用`append`函数追加数据到磁盘分区表
-
-   调用`append`函数向df表追加数据，重新加载该磁盘分区表，发现数据已经追加：
-
-   ```python
-   >>> df1 = orca.DataFrame({"type": np.random.choice(list("abcde"),3), 
-                             "value": np.random.sample(3)*100})
-   >>> df.append(df1,inplace=True)
-   >>> df = orca.read_table(YOUR_DIR + "/DB2", "tb1")
-   >>> len(df)
-   
-   ```
-
-#### 2.3 保存数据到orca分布式表
 
 首先，创建分布式数据库demoDB：
 ```python
@@ -207,7 +118,7 @@ db=database(dbPath, VALUE, `a`b`c`d`e)
    ```      
 - 使用`save_table`函数
   
-   与磁盘表不同的是，对分布式表调用`save_table`函数，会追加数据，而不是覆盖数据。与`append`函数相比，`save_table`函数无需先在客户端通过`read_table`函数获得将要追加的表信息，就可直接在DolphinDB服务端上追加数据的操作。
+   对分布式表调用`save_table`函数，会追加数据。与`append`函数相比，`save_table`函数无需先在客户端通过`read_table`函数获得将要追加的表信息，就可直接在DolphinDB服务端上追加数据。
 
    下面的例子中，通过`save_table`函数直接将内存表的数据追加到指定表：
 
@@ -219,3 +130,6 @@ db=database(dbPath, VALUE, `a`b`c`d`e)
    109
    ```
 
+#### 2.3 保存数据到磁盘表
+
+磁盘分区表与分布式表的差异在于分布式表的数据库路径以"dfs://"开头，而磁盘分区表的数据库路径是本地的一个绝对路径。保存数据到orca磁盘表，2.2小节中的脚本只需将数据库路径以"dfs://"开头改为本地绝对路径即可。唯一要注意的是，使用`save_table`函数将数据保存到磁盘表，若该表已存在，会覆盖该表。
