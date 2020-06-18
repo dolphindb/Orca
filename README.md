@@ -4,7 +4,7 @@ Orca项目在DolphinDB之上实现了pandas API，使用户能更高效地分析
 
 如果你已经熟悉pandas，你就能通过Orca包，充分利用DolphinDB的高性能和并发，处理海量数据，而不需要额外的学习曲线。如果你已经有现成的pandas代码，你不需要对已有的pandas代码进行大量修改，就能迁移到Orca。
 
-目前，Orca项目仍然处于开发阶段，并且在快速迭代。我们欢迎你在使用Orca的同时，通过[GitHub issues](https://github.com/dolphindb/Orca/issues)给我们反馈。
+目前，Orca项目仍然处于开发阶段，并且在快速迭代。我们欢迎你在使用Orca的同时，通过[GitHub issues](../../../Orca/issues)给我们反馈。
 
 
 ## Orca的设计理念
@@ -26,13 +26,13 @@ Orca的顶层是pandas API，底层是DolphinDB数据库，通过DolphinDB Pytho
 - DolphinDB是列式存储的数据库。对于pandas接口中，一些axis=columns参数还没有支持。
 - 目前无法解析Python函数，因此，例如`DataFrame.apply`, `DataFrame.agg`等函数无法接受一个Python函数作为参数。
 
-关于Orca和pandas的详细差异，以及由此带来的Orca编程注意事项，请参考[Orca使用教程](https://github.com/dolphindb/Orca/blob/master/tutorial_cn/user_guide.md)。
+关于Orca和pandas的详细差异，以及由此带来的Orca编程注意事项，请参考[Orca使用教程](../../../Orca/blob/master/tutorial_cn/user_guide.md)。
 
 ## 安装
 
 Orca支持Linux和Windows系统，要求Python版本为3.6及以上，pandas版本为0.25.1及以上。
 
-orca项目已经集成到[DolphinDB Python API](https://github.com/dolphindb/Tutorials_CN/blob/master/python_api.md)中。通过pip工具安装DolphinDB Python API，就可以使用orca。
+orca项目已经集成到[DolphinDB Python API](../../../Tutorials_CN/blob/master/python_api.md)中。通过pip工具安装DolphinDB Python API，就可以使用orca。
 
 ```
 pip install dolphindb
