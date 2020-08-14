@@ -120,7 +120,7 @@ orca提供以下input/output函数：
   |函数|描述|
   |:---|:---|
   |read_csv|导入数据|
-  |read_table|读取DolphinDB的分区表|
+  |read_table|读取DolphinDB的磁盘表、磁盘分区表和分布式表|
   |read_shared_table|读取DolphinDB的共享表|
   
 - `read_csv`函数
