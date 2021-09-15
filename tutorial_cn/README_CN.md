@@ -56,9 +56,9 @@ pd.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
 
 ## 更多信息
 
-- [使用教程和注意事项](../../../Orca/blob/master/tutorial_cn/user_guide.md)
-- [Orca与pandas API的详细差异](../../../Orca/blob/master/tutorial_cn/api_differences.md)
-- [Orca访问DolphinDB分布式数据库教程](../../../Orca/blob/master/tutorial_cn/operations_on_distributed_database.md)
-- [Orca保存数据教程](../../../Orca/blob/master/tutorial_cn/saving_data.md)
-- [用Orca开发量化策略](../../../Orca/blob/master/tutorial_cn/momentum_strategy.md)
-- [DolphinDB Python API](../../../api_python3)
+- [使用教程和注意事项](./user_guide.md)
+- [Orca与pandas API的详细差异](./api_differences.md)
+- [Orca访问DolphinDB分布式数据库教程](./operations_on_distributed_database.md)
+- [Orca保存数据教程](./saving_data.md)
+- [用Orca开发量化策略](./momentum_strategy.md)
+- [DolphinDB Python API](../../../../api_python3/blob/master/README_CN.md)
