@@ -1,5 +1,7 @@
 # Orca User Guide
 
+**This module has been deprecated and is no longer maintained.**
+
  - [1 Installation](#1-installation)   
  - [2 Quick start](#2-quick-start)
  - [3 Architecture](#3-architecture)
