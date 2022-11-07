@@ -1,11 +1,10 @@
 # Orca: pandas API on DolphinDB
 
+温馨提示：目前，DolphinDB 已不再维护该包。
+
 Orca项目在DolphinDB之上实现了pandas API，使用户能更高效地分析处理海量数据。
 
 如果你已经熟悉pandas，你就能通过Orca包，充分利用DolphinDB的高性能和并发，处理海量数据，而不需要额外的学习曲线。如果你已经有现成的pandas代码，你不需要对已有的pandas代码进行大量修改，就能迁移到Orca。
-
-目前，Orca项目仍然处于开发阶段，并且在快速迭代。我们欢迎你在使用Orca的同时，通过[GitHub issues](../../../Orca/issues)给我们反馈。
-
 
 ## Orca的设计理念
 
@@ -61,5 +60,4 @@ pd.connect(MY_HOST, MY_PORT, MY_USERNAME, MY_PASSWORD)
 - [Orca访问DolphinDB分布式数据库教程](./operations_on_distributed_database.md)
 - [Orca保存数据教程](./saving_data.md)
 - [用Orca开发量化策略](./momentum_strategy.md)
-- [DolphinDB Python API](../../../../api_python3/blob/master/README_CN.md)
-
+- [DolphinDB Python API](../../../../api_python3)
